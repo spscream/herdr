@@ -68,6 +68,16 @@ pub(crate) fn dock_split(area: Rect, dock: Option<DockState>) -> (Rect, Option<R
     }
 }
 
+/// The process a workspace's dock holds.
+///
+/// Separate from [`DockState`], which is geometry the whole application shares.
+/// Each workspace runs its own dock process, so this lives on the workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DockPaneState {
+    pub pane_id: crate::layout::PaneId,
+    pub terminal_id: crate::terminal::TerminalId,
+}
+
 /// The `[ui.dock]` section of the configuration file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]

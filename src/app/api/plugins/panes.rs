@@ -41,6 +41,64 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    pub(super) fn open_plugin_dock_pane(
+        &mut self,
+        id: String,
+        params: PluginPaneOpenParams,
+        plugin: &InstalledPluginInfo,
+        pane: PluginManifestPane,
+    ) -> String {
+        let ws_idx = match params.workspace_id.as_deref() {
+            Some(workspace_id) => match self.parse_workspace_id(workspace_id) {
+                Some(ws_idx) => ws_idx,
+                None => return encode_error(id, "workspace_not_found", "workspace not found"),
+            },
+            None => match self.state.active {
+                Some(ws_idx) => ws_idx,
+                None => return encode_error(id, "no_active_workspace", "no active workspace"),
+            },
+        };
+        if self.state.dock.is_none() {
+            return encode_error(
+                id,
+                "dock_disabled",
+                "the dock is off; set [ui.dock] enabled = true",
+            );
+        }
+        if self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .is_some_and(|workspace| workspace.dock_pane.is_some())
+        {
+            return encode_error(id, "ui_busy", "the workspace dock is already occupied");
+        }
+        let cwd = self.plugin_pane_cwd(plugin, params.cwd);
+        let context = self.plugin_context_for_workspace(ws_idx, "plugin-pane");
+        let extra_env =
+            match self.plugin_pane_launch_env(plugin, &pane.id, &cwd, params.env, &context) {
+                Ok(env) => env,
+                Err((code, message)) => return encode_error(id, &code, message),
+            };
+        if let Err(err) = self.spawn_dock_argv_command(ws_idx, &pane.command, Some(cwd), extra_env)
+        {
+            return encode_error(id, "plugin_pane_open_failed", err.to_string());
+        }
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.dock_pane.as_ref())
+            .map(|dock| dock.terminal_id.clone())
+        else {
+            return encode_error(id, "plugin_pane_open_failed", "plugin dock disappeared");
+        };
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            terminal.set_manual_label(pane.title);
+        }
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn open_plugin_overlay_pane(
         &mut self,
         id: String,

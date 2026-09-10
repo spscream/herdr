@@ -445,6 +445,9 @@ pub struct PluginPaneOpenParams {
 pub enum PluginPanePlacement {
     #[default]
     Overlay,
+    /// The workspace's dock column. Its width and edge come from `[ui.dock]`,
+    /// not from the plugin, because every tab of the workspace shares it.
+    Dock,
     Popup,
     Split,
     Tab,

@@ -177,6 +177,15 @@ impl App {
                 self.close_popup_pane();
                 return Vec::new();
             }
+            if let Some(ws_idx) = self.state.workspaces.iter().position(|workspace| {
+                workspace
+                    .dock_pane
+                    .as_ref()
+                    .is_some_and(|dock| dock.pane_id == *pane_id)
+            }) {
+                self.close_dock_pane(ws_idx);
+                return Vec::new();
+            }
             if worktree_restore_failed {
                 worktree_restore_updates
                     .extend(self.publish_worktree_runtime_agent_release(*pane_id));

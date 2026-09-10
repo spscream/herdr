@@ -425,6 +425,9 @@ fn restore_workspace(
             next_public_tab_number,
             active_tab: snap.active_tab.min(tabs.len().saturating_sub(1)),
             tabs,
+            // A restored session has no dock process yet; the dock is opened
+            // after restore, not carried through the snapshot.
+            dock_pane: None,
             #[cfg(test)]
             test_runtimes: HashMap::new(),
         })

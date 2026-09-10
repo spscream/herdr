@@ -508,6 +508,15 @@ impl App {
                     );
                 }
             }
+            PluginPanePlacement::Dock => {
+                if params.target_pane_id.is_some() || params.direction.is_some() {
+                    return encode_error(
+                        id,
+                        "invalid_params",
+                        "dock plugin panes support workspace_id but not target_pane_id or direction",
+                    );
+                }
+            }
         }
 
         match placement {
@@ -519,6 +528,7 @@ impl App {
                 self.open_plugin_split_pane(id, params, &plugin, pane, placement)
             }
             PluginPanePlacement::Tab => self.open_plugin_tab(id, params, &plugin, pane),
+            PluginPanePlacement::Dock => self.open_plugin_dock_pane(id, params, &plugin, pane),
         }
     }
 
@@ -2218,6 +2228,185 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_pane_open_dock_occupies_the_dock_and_leaves_the_tree_alone() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = crate::config::Config::default();
+        config.ui.dock = crate::dock::DockConfig {
+            enabled: true,
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+        };
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-dock")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = crate::app::Mode::Terminal;
+        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        let root_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let root_public = app.public_pane_id(0, root_pane).unwrap();
+
+        let root = unique_temp_path("plugin-pane-dock");
+        let env_capture = root.join("dock-env.txt");
+        let manifest = format!(
+            r#"
+id = "example.dock"
+name = "Dock Plugin"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "tree"
+title = "Plugin Dock"
+placement = "dock"
+command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
+"#,
+            env_capture.display()
+        );
+        write_manifest_content(&root, &manifest);
+        link_manifest(&mut app, &root);
+
+        let dock_request = |id: &str| Request {
+            id: id.into(),
+            method: Method::PluginPaneOpen(PluginPaneOpenParams {
+                plugin_id: "example.dock".into(),
+                entrypoint: "tree".into(),
+                placement: None,
+                width: None,
+                height: None,
+                workspace_id: None,
+                target_pane_id: None,
+                direction: None,
+                cwd: None,
+                focus: true,
+                env: std::collections::HashMap::new(),
+            }),
+        };
+        let open = app.handle_api_request(dock_request("pane-open-dock"));
+        assert_eq!(response_result(&open), ResponseResult::Ok {});
+        let duplicate = app.handle_api_request(dock_request("pane-open-dock-duplicate"));
+        let duplicate: crate::api::schema::ErrorResponse =
+            serde_json::from_str(&duplicate).unwrap();
+        assert_eq!(duplicate.error.code, "ui_busy");
+        assert_eq!(
+            read_capture_when_ready(&env_capture, || {
+                app.drain_internal_events();
+            }),
+            "unset"
+        );
+
+        let opened_pane_id = app.state.workspaces[0]
+            .dock_pane
+            .as_ref()
+            .expect("the dock holds the plugin")
+            .pane_id;
+        assert!(!app.state.plugin_panes.contains_key(&opened_pane_id));
+        app.state.assert_invariants_for_test();
+
+        // The dock is chrome, not a pane: the tab's tree is untouched and the
+        // pane list still names only the root pane.
+        assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
+        assert!(!app.state.workspaces[0].tabs[0].zoomed);
+        let pane_list = app.handle_api_request(Request {
+            id: "pane-list-dock".into(),
+            method: Method::PaneList(PaneListParams {
+                workspace_id: Some(app.public_workspace_id(0)),
+            }),
+        });
+        let ResponseResult::PaneList { panes } = response_result(&pane_list) else {
+            panic!("expected pane list response: {pane_list}");
+        };
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].pane_id, root_public);
+
+        // The reserved column is where the geometry says it is.
+        let (outer, inner) = crate::ui::dock_pane_rects(&app.state, app.state.view.terminal_area)
+            .expect("dock rects");
+        assert_eq!(outer, ratatui::layout::Rect::new(68, 0, 32, 30));
+        assert_eq!((inner.width, inner.height), (30, 28));
+
+        // A dead dock process frees the dock instead of stranding it.
+        app.handle_internal_event(crate::events::AppEvent::PaneDied {
+            pane_id: opened_pane_id,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+        assert!(app.state.workspaces[0].dock_pane.is_none());
+        app.state.assert_invariants_for_test();
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_pane_open_dock_is_refused_when_the_dock_is_off() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        // Default config: [ui.dock] enabled is false.
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-dock-off")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+
+        let root = unique_temp_path("plugin-pane-dock-off");
+        let manifest = r#"
+id = "example.dock"
+name = "Dock Plugin"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "tree"
+title = "Plugin Dock"
+placement = "dock"
+command = ["sh", "-c", "sleep 1"]
+"#;
+        write_manifest_content(&root, manifest);
+        link_manifest(&mut app, &root);
+
+        let response = app.handle_api_request(Request {
+            id: "pane-open-dock-off".into(),
+            method: Method::PluginPaneOpen(PluginPaneOpenParams {
+                plugin_id: "example.dock".into(),
+                entrypoint: "tree".into(),
+                placement: None,
+                width: None,
+                height: None,
+                workspace_id: None,
+                target_pane_id: None,
+                direction: None,
+                cwd: None,
+                focus: true,
+                env: std::collections::HashMap::new(),
+            }),
+        });
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(response.error.code, "dock_disabled");
+        assert!(app.state.workspaces[0].dock_pane.is_none());
+
         let _ = std::fs::remove_dir_all(root);
     }
 

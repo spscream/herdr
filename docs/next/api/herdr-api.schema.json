@@ -3786,14 +3786,23 @@
           "type": "object"
         },
         "PluginPanePlacement": {
-          "enum": [
-            "overlay",
-            "popup",
-            "split",
-            "tab",
-            "zoomed"
-          ],
-          "type": "string"
+          "oneOf": [
+            {
+              "enum": [
+                "overlay",
+                "popup",
+                "split",
+                "tab",
+                "zoomed"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "dock",
+              "description": "The workspace's dock column. Its width and edge come from `[ui.dock]`,\nnot from the plugin, because every tab of the workspace shares it.",
+              "type": "string"
+            }
+          ]
         },
         "PluginSetEnabledParams": {
           "properties": {
@@ -9079,14 +9088,23 @@
           "type": "object"
         },
         "PluginPanePlacement": {
-          "enum": [
-            "overlay",
-            "popup",
-            "split",
-            "tab",
-            "zoomed"
-          ],
-          "type": "string"
+          "oneOf": [
+            {
+              "enum": [
+                "overlay",
+                "popup",
+                "split",
+                "tab",
+                "zoomed"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "dock",
+              "description": "The workspace's dock column. Its width and edge come from `[ui.dock]`,\nnot from the plugin, because every tab of the workspace shares it.",
+              "type": "string"
+            }
+          ]
         },
         "PluginPlatform": {
           "enum": [

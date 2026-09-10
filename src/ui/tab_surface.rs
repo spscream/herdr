@@ -135,7 +135,13 @@ pub(crate) fn render_tab_surface(
     frame: &mut Frame,
 ) {
     if let Some(dock_rect) = dock_rect {
-        render_dock(app, dock_rect, frame);
+        render_dock(
+            app,
+            terminal_runtimes,
+            surface.target.map(|target| target.workspace_index),
+            dock_rect,
+            frame,
+        );
     }
     render_panes(
         app,
@@ -147,16 +153,25 @@ pub(crate) fn render_tab_surface(
     );
 }
 
-/// Draw the dock column.
-///
-/// The dock has no process yet, so this only proves the column exists and is
-/// nobody else's to draw into.
-fn render_dock(_app: &AppState, dock_rect: Rect, frame: &mut Frame) {
+/// Draw the dock column and, when the workspace has one, its process.
+fn render_dock(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    ws_idx: Option<usize>,
+    dock_rect: Rect,
+    frame: &mut Frame,
+) {
     frame.render_widget(Clear, dock_rect);
-    frame.render_widget(
-        Block::default().borders(Borders::ALL).title("dock"),
-        dock_rect,
-    );
+    frame.render_widget(Block::default().borders(Borders::ALL), dock_rect);
+
+    let Some(runtime) = ws_idx.and_then(|ws_idx| app.runtime_for_dock(terminal_runtimes, ws_idx))
+    else {
+        return;
+    };
+    let Some((_outer, inner)) = super::panes::dock_pane_rects_from_outer(dock_rect) else {
+        return;
+    };
+    runtime.render(frame, inner, false);
 }
 
 pub(crate) fn tab_surface_hyperlinks(
@@ -429,14 +444,13 @@ mod tests {
         }
 
         let dock_x = 74usize;
+        assert!(
+            !rows.iter().any(|row| row.concat().contains("TREE")),
+            "an empty dock draws nothing of its own"
+        );
         assert_eq!(
             rows[0][dock_x], "\u{250c}",
             "the dock's top-left corner sits at x=74"
-        );
-        assert!(
-            rows[0][dock_x..].concat().contains("dock"),
-            "the dock is titled: {:?}",
-            rows[0][dock_x..].concat()
         );
         let left_of_dock: String = rows.iter().map(|row| row[..dock_x].concat()).collect();
         let dock_column: String = rows.iter().map(|row| row[dock_x..].concat()).collect();
@@ -445,6 +459,73 @@ mod tests {
             !dock_column.contains("LEFT") && !dock_column.contains("RIGHT"),
             "no pane may draw into the dock column"
         );
+    }
+
+    #[tokio::test]
+    async fn a_dock_draws_the_process_it_holds() {
+        let mut workspace = Workspace::test_new("dock-workspace");
+        let dock_pane = crate::layout::PaneId::alloc();
+        workspace.insert_test_runtime(
+            dock_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(30, 28, b"TREE"),
+        );
+        workspace.dock_pane = Some(crate::dock::DockPaneState {
+            pane_id: dock_pane,
+            terminal_id: crate::terminal::TerminalId::alloc(),
+        });
+
+        let mut app = AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: false,
+        });
+
+        let area = Rect::new(0, 0, 106, 20);
+        let registry = TerminalRuntimeRegistry::new();
+        let surface = compute_tab_surface(
+            &app,
+            &registry,
+            area,
+            false,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        let view = TabSurfaceView {
+            target: surface.target,
+            pane_infos: &surface.pane_infos,
+            split_borders: &surface.split_borders,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_tab_surface(&app, &registry, view, surface.dock_rect, frame))
+            .unwrap();
+
+        let cells: Vec<&str> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        let rows: Vec<Vec<&str>> = cells
+            .chunks(area.width as usize)
+            .map(<[&str]>::to_vec)
+            .collect();
+        for row in &rows {
+            println!("{}", row.concat());
+        }
+
+        let dock_x = 74usize;
+        let dock_column: String = rows.iter().map(|row| row[dock_x..].concat()).collect();
+        let left_of_dock: String = rows.iter().map(|row| row[..dock_x].concat()).collect();
+        assert!(
+            dock_column.contains("TREE"),
+            "the dock's process is drawn inside the dock: {dock_column:?}"
+        );
+        assert!(!left_of_dock.contains("TREE"), "and nowhere else");
     }
 
     fn right_edge_of(layout: &TabSurfaceLayout) -> u16 {

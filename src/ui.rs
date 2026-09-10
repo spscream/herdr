@@ -17,10 +17,11 @@ pub(crate) use self::onboarding::{
 };
 #[cfg(all(test, unix))]
 pub(crate) use self::panes::popup_pane_rects;
-use self::panes::resize_popup_pane;
 pub(crate) use self::panes::{
-    apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back, render_selection_highlight,
+    apply_pane_chrome, dock_pane_rects, pane_inner_rect, pane_is_scrolled_back,
+    render_selection_highlight,
 };
+use self::panes::{resize_dock_pane, resize_popup_pane};
 pub(crate) use self::release_notes::{
     product_announcement_display_lines, product_announcement_scroll_metrics,
     release_notes_close_button_rect, release_notes_display_lines, release_notes_scroll_metrics,
@@ -98,6 +99,11 @@ fn compute_view_internal(
     if resize_panes {
         resize_background_tab_panes(app, terminal_runtimes, area, cell_size);
         resize_popup_pane(app, terminal_runtimes, area, cell_size);
+        // Every workspace keeps its own dock process alive, so a resize has to
+        // reach the background ones too, exactly like background tab panes.
+        for ws_idx in 0..app.workspaces.len() {
+            resize_dock_pane(app, terminal_runtimes, ws_idx, area, cell_size);
+        }
     }
 
     app.view = crate::app::ViewState {

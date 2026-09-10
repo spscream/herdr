@@ -933,6 +933,28 @@ impl AppState {
 
     /// Returns true when the given (workspace, tab, pane) refers to the
     /// currently focused pane in the active workspace's active tab.
+    /// The running process of `ws_idx`'s dock, if it has one.
+    ///
+    /// Mirrors `runtime_for_pane_in_workspace`, including its test fallback, so
+    /// a dock can be rendered in a test without a real PTY.
+    pub(crate) fn runtime_for_dock<'a>(
+        &'a self,
+        terminal_runtimes: &'a crate::terminal::TerminalRuntimeRegistry,
+        ws_idx: usize,
+    ) -> Option<&'a crate::terminal::TerminalRuntime> {
+        let dock = self.workspaces.get(ws_idx)?.dock_pane.as_ref()?;
+        #[cfg(test)]
+        if let Some(runtime) = self
+            .workspaces
+            .get(ws_idx)?
+            .test_runtimes
+            .get(&dock.pane_id)
+        {
+            return Some(runtime);
+        }
+        terminal_runtimes.get(&dock.terminal_id)
+    }
+
     pub(crate) fn runtime_for_pane_in_workspace<'a>(
         &'a self,
         terminal_runtimes: &'a crate::terminal::TerminalRuntimeRegistry,
@@ -1287,6 +1309,22 @@ impl AppState {
                 !attached_terminal_ids.contains(&popup.terminal_id),
                 "popup terminal {} must not be attached to a tiled pane",
                 popup.terminal_id
+            );
+        }
+        for workspace in &self.workspaces {
+            let Some(dock) = &workspace.dock_pane else {
+                continue;
+            };
+            assert!(
+                self.terminals.contains_key(&dock.terminal_id),
+                "dock {:?} references missing terminal {}",
+                dock.pane_id,
+                dock.terminal_id
+            );
+            assert!(
+                !attached_terminal_ids.contains(&dock.terminal_id),
+                "dock terminal {} must not be attached to a tiled pane",
+                dock.terminal_id
             );
         }
         for &pane_id in self.plugin_panes.keys() {

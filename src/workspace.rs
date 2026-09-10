@@ -202,6 +202,8 @@ pub struct Workspace {
     pub(crate) next_public_tab_number: usize,
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
+    /// Process held by this workspace's dock, if one is open.
+    pub dock_pane: Option<crate::dock::DockPaneState>,
     #[cfg(test)]
     pub(crate) test_runtimes: HashMap<PaneId, TerminalRuntime>,
 }
@@ -265,6 +267,7 @@ impl Workspace {
             public_pane_numbers,
             next_public_pane_number: 2,
             next_public_tab_number: 2,
+            dock_pane: None,
             tabs: vec![tab],
             active_tab: 0,
             #[cfg(test)]
@@ -417,6 +420,7 @@ impl Workspace {
                 public_pane_numbers,
                 next_public_pane_number: 2,
                 next_public_tab_number: 2,
+                dock_pane: None,
                 tabs: vec![tab],
                 active_tab: 0,
                 #[cfg(test)]
@@ -1210,6 +1214,7 @@ impl Workspace {
             public_pane_numbers,
             next_public_pane_number: 2,
             next_public_tab_number: 2,
+            dock_pane: None,
             tabs: vec![tab],
             active_tab: 0,
             test_runtimes: HashMap::new(),

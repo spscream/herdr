@@ -418,6 +418,52 @@ pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect
         .map(|geometry| (geometry.outer, geometry.inner))
 }
 
+/// Outer and inner rectangles of the workspace dock, for a full tab surface `area`.
+///
+/// The inner rectangle is what the dock's process is given; the ring between
+/// the two is the dock's border.
+pub(crate) fn dock_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
+    let (_tab_area, dock_rect) = crate::dock::dock_split(area, app.dock);
+    let outer = dock_rect?;
+    let inner = pane_inner_rect(outer, Borders::ALL);
+    Some((outer, inner))
+}
+
+/// Inner rectangle for a dock whose outer rectangle is already known.
+pub(super) fn dock_pane_rects_from_outer(outer: Rect) -> Option<(Rect, Rect)> {
+    Some((outer, pane_inner_rect(outer, Borders::ALL)))
+}
+
+pub(super) fn resize_dock_pane(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    ws_idx: usize,
+    area: Rect,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) {
+    let Some(dock) = app
+        .workspaces
+        .get(ws_idx)
+        .and_then(|workspace| workspace.dock_pane.as_ref())
+    else {
+        return;
+    };
+    let Some((_outer, inner)) = dock_pane_rects(app, area) else {
+        return;
+    };
+    if app.direct_attach_resize_locks.contains(&dock.terminal_id) {
+        return;
+    }
+    if let Some(rt) = app.runtime_for_dock(terminal_runtimes, ws_idx) {
+        rt.resize(
+            inner.height,
+            inner.width,
+            cell_size.width_px,
+            cell_size.height_px,
+        );
+    }
+}
+
 pub(super) fn resize_popup_pane(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
