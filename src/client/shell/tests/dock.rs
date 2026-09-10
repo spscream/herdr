@@ -137,3 +137,29 @@ fn a_click_beside_the_dock_still_reaches_the_pane_under_it() {
     assert_eq!(recorded.pane_id, "pane_1");
     assert_eq!((recorded.viewport_row, recorded.col), (0, 1));
 }
+
+#[test]
+fn the_toggle_dock_key_asks_the_server_to_collapse_the_column() {
+    let mut state = state_with_dock();
+
+    // The key is a client-side keybind, but collapsing the dock is server
+    // state: every attached client has to see the same column. So the shell
+    // must turn the keybind into an API call, not into a local flag.
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleDock),
+        &mut outcome,
+    );
+
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!(
+            "the dock key must reach the endpoint API, got {:?}",
+            outcome.actions
+        );
+    };
+    assert!(
+        matches!(&request.method, crate::api::schema::Method::DockToggle(_)),
+        "expected dock.toggle, got {:?}",
+        request.method
+    );
+}
