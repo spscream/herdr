@@ -371,8 +371,11 @@ impl App {
         // Try to restore previous session
         let mut restored_terminals = std::collections::HashMap::new();
         let mut restored_terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let (workspaces, active, selected) = if !policy.restore_session {
-            (Vec::new(), None, 0)
+        // `dock_collapsed` rides along with `active` and `selected`: the
+        // snapshot is read inside this block, but the dock is built from the
+        // configuration further down.
+        let (workspaces, active, selected, restored_dock_collapsed) = if !policy.restore_session {
+            (Vec::new(), None, 0, false)
         } else if let Some(snap) = crate::persist::load() {
             let history = config
                 .experimental
@@ -396,15 +399,15 @@ impl App {
             restored_terminal_runtimes = terminal_runtimes.into();
             if ws.is_empty() {
                 crate::logging::session_restored(0, "empty");
-                (Vec::new(), None, 0)
+                (Vec::new(), None, 0, false)
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
                 let active = snap.active.filter(|&i| i < ws.len());
                 let selected = snap.selected.min(ws.len().saturating_sub(1));
-                (ws, active, selected)
+                (ws, active, selected, snap.dock_collapsed)
             }
         } else {
-            (Vec::new(), None, 0)
+            (Vec::new(), None, 0, false)
         };
 
         let agent_panel_sort = agent_panel_sort_from_config(config.ui.agent_panel_sort);
@@ -491,7 +494,12 @@ impl App {
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
-            dock: config.ui.dock.state(),
+            // The configuration owns the edge and the width; the session owns
+            // only whether the column is collapsed.
+            dock: config.ui.dock.state().map(|dock| crate::dock::DockState {
+                collapsed: restored_dock_collapsed,
+                ..dock
+            }),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -839,7 +847,14 @@ impl App {
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
-                self.state.dock = config.ui.dock.state();
+                // A reload brings a new edge and width, but not a new answer
+                // to "is it collapsed" -- that is runtime state the file does
+                // not carry, so it survives the reload.
+                let was_collapsed = self.state.dock_collapsed();
+                self.state.dock = config.ui.dock.state().map(|dock| crate::dock::DockState {
+                    collapsed: was_collapsed,
+                    ..dock
+                });
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -3124,6 +3139,110 @@ mod tests {
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(config_home);
+    }
+
+    /// An app that saves its session and restores one, with a dock configured.
+    fn app_with_dock_persistence(config: &Config) -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        App::new(
+            config,
+            AppPolicy {
+                restore_session: true,
+                persist_session: true,
+                persist_plugin_registry: false,
+                background_updates: false,
+            },
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        )
+    }
+
+    fn dock_config() -> Config {
+        let mut config = Config::default();
+        config.ui.dock = crate::dock::DockConfig {
+            enabled: true,
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+        };
+        config
+    }
+
+    // Restoring a session spawns real PTYs, which need a reactor.
+    #[tokio::test]
+    async fn a_collapsed_dock_comes_back_collapsed_after_a_restart() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let config_home = unique_temp_path("dock-collapsed-restart");
+        std::env::set_var("XDG_CONFIG_HOME", &config_home);
+        std::env::remove_var(crate::session::SESSION_ENV_VAR);
+        let config = dock_config();
+
+        let mut first = app_with_dock_persistence(&config);
+        first.state.workspaces = vec![Workspace::test_new("docked")];
+        first.state.active = Some(0);
+        first.state.ensure_test_terminals();
+        first
+            .state
+            .dock
+            .as_mut()
+            .expect("the configuration enables the dock")
+            .collapsed = true;
+        first.save_session_on_shutdown();
+
+        // A second process, same configuration file. The edge and the width
+        // come from the file either way; only the collapse has to travel
+        // through the session.
+        let second = app_with_dock_persistence(&config);
+        let dock = second.state.dock.expect("the dock stays configured");
+        assert!(
+            dock.collapsed,
+            "a restart must not reopen a dock the user collapsed"
+        );
+        assert_eq!(dock.width, crate::popup_size::PopupSize::Cells(32));
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(config_home);
+    }
+
+    // Restoring a session spawns real PTYs, which need a reactor.
+    #[tokio::test]
+    async fn an_open_dock_stays_open_after_a_restart() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let config_home = unique_temp_path("dock-open-restart");
+        std::env::set_var("XDG_CONFIG_HOME", &config_home);
+        std::env::remove_var(crate::session::SESSION_ENV_VAR);
+        let config = dock_config();
+
+        let mut first = app_with_dock_persistence(&config);
+        first.state.workspaces = vec![Workspace::test_new("docked")];
+        first.state.active = Some(0);
+        first.state.ensure_test_terminals();
+        first.save_session_on_shutdown();
+
+        let second = app_with_dock_persistence(&config);
+        assert!(!second.state.dock.expect("dock configured").collapsed);
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(config_home);
+    }
+
+    #[test]
+    fn reloading_the_configuration_does_not_reopen_a_collapsed_dock() {
+        let mut app = test_app();
+        app.state.dock = crate::dock::DockConfig {
+            enabled: true,
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+        }
+        .state();
+        app.state.dock.as_mut().expect("dock configured").collapsed = true;
+
+        app.apply_live_config(&dock_config(), &[], &[], false);
+
+        assert!(
+            app.state.dock.expect("dock configured").collapsed,
+            "a reload carries an edge and a width, not a collapse"
+        );
     }
 
     #[test]

@@ -85,6 +85,7 @@ impl HeadlessServer {
             &self.app.terminal_runtimes,
             self.app.state.active,
             self.app.state.selected,
+            self.app.state.dock_collapsed(),
         );
 
         let mut handoff_entries = Vec::new();

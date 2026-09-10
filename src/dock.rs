@@ -19,7 +19,10 @@ pub enum DockEdge {
     Right,
 }
 
-/// A workspace's dock. One per workspace, shared by every tab in it.
+/// The dock column, as the whole application sees it.
+///
+/// One per application, shared by every workspace and every tab. Each workspace
+/// runs its own process inside the column -- see [`DockPaneState`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DockState {
     pub edge: DockEdge,

@@ -931,9 +931,6 @@ impl AppState {
         }
     }
 
-    /// Returns true when the given (workspace, tab, pane) refers to the
-    /// currently focused pane in the active workspace's active tab.
-    /// The running process of `ws_idx`'s dock, if it has one.
     /// The part of the terminal area the panes live in.
     ///
     /// `view.terminal_area` is the whole tab area, dock included, because the
@@ -944,6 +941,15 @@ impl AppState {
         crate::dock::dock_split(self.view.terminal_area, self.dock).0
     }
 
+    /// Whether the dock column is collapsed. False when there is no dock.
+    ///
+    /// The session snapshot stores this one flag, so both places that capture a
+    /// session read it through the same name.
+    pub(crate) fn dock_collapsed(&self) -> bool {
+        self.dock.is_some_and(|dock| dock.collapsed)
+    }
+
+    /// The running process of `ws_idx`'s dock, if it has one.
     ///
     /// Mirrors `runtime_for_pane_in_workspace`, including its test fallback, so
     /// a dock can be rendered in a test without a real PTY.
@@ -965,6 +971,8 @@ impl AppState {
         terminal_runtimes.get(&dock.terminal_id)
     }
 
+    /// Returns true when the given (workspace, tab, pane) refers to the
+    /// currently focused pane in the active workspace's active tab.
     pub(crate) fn runtime_for_pane_in_workspace<'a>(
         &'a self,
         terminal_runtimes: &'a crate::terminal::TerminalRuntimeRegistry,

@@ -26,6 +26,13 @@ pub struct SessionSnapshot {
     pub sidebar_section_split: Option<f32>,
     #[serde(default)]
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    /// Whether the dock column is collapsed.
+    ///
+    /// The only part of the dock a session has to remember. `edge` and `width`
+    /// come from `[ui.dock]` and are re-applied on every configuration reload,
+    /// so persisting them here would let a stale session outvote the file.
+    #[serde(default)]
+    pub dock_collapsed: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -184,6 +191,8 @@ struct RawSessionSnapshot {
     sidebar_section_split: Option<f32>,
     #[serde(default)]
     collapsed_space_keys: std::collections::HashSet<String>,
+    #[serde(default)]
+    dock_collapsed: bool,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -199,6 +208,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
+        dock_collapsed: raw.dock_collapsed,
     })
 }
 
@@ -258,6 +268,7 @@ pub fn capture(
     terminal_runtimes: &TerminalRuntimeRegistry,
     active: Option<usize>,
     selected: usize,
+    dock_collapsed: bool,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -270,6 +281,7 @@ pub fn capture(
         sidebar_width: None,
         sidebar_section_split: None,
         collapsed_space_keys: std::collections::HashSet::new(),
+        dock_collapsed,
     }
 }
 
@@ -535,6 +547,7 @@ mod tests {
             terminal_runtimes,
             state.active,
             state.selected,
+            state.dock_collapsed(),
         )
     }
 
@@ -590,6 +603,48 @@ mod tests {
     }
 
     #[test]
+    fn a_collapsed_dock_survives_the_session_file() {
+        let mut state = state_with_workspaces(&["docked"]);
+        state.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: true,
+        });
+
+        // Through the file, not through the struct: the read path builds a
+        // `RawSessionSnapshot` first, so a field declared only on
+        // `SessionSnapshot` serialises fine and is dropped on every load.
+        let json = serde_json::to_string(&capture_from_state(&state)).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+
+        assert!(
+            restored.dock_collapsed,
+            "the session must remember a collapsed dock, got {json}"
+        );
+    }
+
+    #[test]
+    fn an_open_dock_is_saved_as_open() {
+        let mut state = state_with_workspaces(&["docked"]);
+        state.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: false,
+        });
+        assert!(!capture_from_state(&state).dock_collapsed);
+    }
+
+    #[test]
+    fn a_session_file_written_before_the_dock_loads_as_open() {
+        // The field is absent from every file an earlier herdr wrote, and from
+        // every file the upstream binary writes. Absent must read as "open",
+        // which is what those versions showed.
+        let json = r#"{"version":3,"workspaces":[],"active":null,"selected":0}"#;
+        let restored = parse_snapshot(json).unwrap();
+        assert!(!restored.dock_collapsed);
+    }
+
+    #[test]
     fn round_trip_empty_session() {
         let snap = SessionSnapshot {
             version: SNAPSHOT_VERSION,
@@ -599,6 +654,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            dock_collapsed: false,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -686,6 +742,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            dock_collapsed: false,
             version: SNAPSHOT_VERSION,
         };
 
@@ -1253,6 +1310,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            dock_collapsed: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
