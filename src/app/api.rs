@@ -1187,6 +1187,19 @@ impl App {
                     responses::encode_error(request.id, "popup_not_open", "no popup is open")
                 };
             }
+            Method::DockToggle(_) => {
+                let Some(dock) = self.state.dock.as_mut() else {
+                    return responses::encode_error(
+                        request.id,
+                        "dock_disabled",
+                        "the dock is off; set [ui.dock] enabled = true",
+                    );
+                };
+                dock.collapsed = !dock.collapsed;
+                self.render_dirty.request_generic();
+                self.render_notify.notify_one();
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
             Method::PaneSendKeys(params) => return self.handle_pane_send_keys(request.id, params),
             Method::IntegrationList(_) => {
                 return self.handle_integration_list(request.id);

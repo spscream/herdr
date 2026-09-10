@@ -98,6 +98,13 @@ pub(super) fn pane_zoom(params: PaneZoomParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:zoom", Method::PaneZoom(params))
 }
 
+pub(super) fn dock_toggle() -> std::io::Result<i32> {
+    print_method_response(
+        "cli:dock:toggle",
+        Method::DockToggle(crate::api::schema::EmptyParams::default()),
+    )
+}
+
 pub(super) fn pane_rename(params: PaneRenameParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:rename", Method::PaneRename(params))
 }

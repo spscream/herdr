@@ -60,6 +60,7 @@ pub(crate) enum KeybindAction {
     ResizePaneUp,
     ResizePaneRight,
     ToggleSidebar,
+    ToggleDock,
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
@@ -145,6 +146,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.resize_pane_up, KeybindAction::ResizePaneUp),
         (&keybinds.resize_pane_right, KeybindAction::ResizePaneRight),
         (&keybinds.toggle_sidebar, KeybindAction::ToggleSidebar),
+        (&keybinds.toggle_dock, KeybindAction::ToggleDock),
         (&keybinds.reload_config, KeybindAction::ReloadConfig),
         (
             &keybinds.open_notification_target,
@@ -282,6 +284,34 @@ mod tests {
             resolve_prefix_binding(&keybinds, &one),
             Some(KeybindMatch::Action(KeybindAction::SwitchTab(0)))
         ));
+    }
+
+    #[test]
+    fn the_shipped_defaults_bind_prefix_d_to_the_dock_and_prefix_b_to_the_sidebar() {
+        // Keybinds::default() is Config::default().keybinds(), so this covers the
+        // whole chain: the [keys] defaults, the overlay, and the resolver.
+        let keybinds = Keybinds::default();
+
+        let dock = TerminalKey::new(KeyCode::Char('d'), KeyModifiers::empty());
+        assert!(
+            matches!(
+                resolve_prefix_binding(&keybinds, &dock),
+                Some(KeybindMatch::Action(KeybindAction::ToggleDock))
+            ),
+            "prefix+d toggles the dock"
+        );
+
+        // The dock needed a key of its own because the sidebar already owns
+        // prefix+b. Asserting both together is what keeps a later default from
+        // quietly moving one onto the other.
+        let sidebar = TerminalKey::new(KeyCode::Char('b'), KeyModifiers::empty());
+        assert!(
+            matches!(
+                resolve_prefix_binding(&keybinds, &sidebar),
+                Some(KeybindMatch::Action(KeybindAction::ToggleSidebar))
+            ),
+            "prefix+b still toggles the sidebar"
+        );
     }
 
     #[test]

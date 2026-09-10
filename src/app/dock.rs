@@ -146,3 +146,70 @@ impl App {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::api::schema::{EmptyParams, Method, Request, ResponseResult};
+    use crate::app::App;
+
+    fn app_with_dock(enabled: bool) -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = crate::config::Config::default();
+        config.ui.dock = crate::dock::DockConfig {
+            enabled,
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+        };
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("dock")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        app
+    }
+
+    fn toggle(app: &mut App) -> String {
+        app.handle_api_request(Request {
+            id: "dock-toggle".into(),
+            method: Method::DockToggle(EmptyParams::default()),
+        })
+    }
+
+    fn dock_width(app: &App) -> Option<u16> {
+        crate::ui::dock_pane_rects(&app.state, app.state.view.terminal_area)
+            .map(|(outer, _inner)| outer.width)
+    }
+
+    #[test]
+    fn toggling_the_dock_gives_the_column_back_and_takes_it_again() {
+        let mut app = app_with_dock(true);
+        assert_eq!(dock_width(&app), Some(32));
+
+        let response = toggle(&mut app);
+        let response: crate::api::schema::SuccessResponse =
+            serde_json::from_str(&response).unwrap();
+        assert_eq!(response.result, ResponseResult::Ok {});
+        assert_eq!(
+            dock_width(&app),
+            None,
+            "a collapsed dock reserves no column at all"
+        );
+
+        toggle(&mut app);
+        assert_eq!(dock_width(&app), Some(32), "and toggling again restores it");
+    }
+
+    #[test]
+    fn toggling_is_refused_when_the_dock_is_off() {
+        let mut app = app_with_dock(false);
+        let response = toggle(&mut app);
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(response.error.code, "dock_disabled");
+    }
+}

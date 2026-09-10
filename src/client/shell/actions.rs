@@ -1157,6 +1157,9 @@ impl ClientShellState {
                 pane_id: focused_pane,
                 mode: PaneZoomMode::Toggle,
             })),
+            KeybindAction::ToggleDock => Some(Method::DockToggle(
+                crate::api::schema::EmptyParams::default(),
+            )),
             KeybindAction::EditScrollback => Some(Method::PaneEditScrollback(PaneTarget {
                 pane_id: focused_pane?,
             })),
