@@ -148,6 +148,7 @@ pub(super) struct ShellHitMap {
     pub(super) tabs: Vec<(Rect, String)>,
     pub(super) panes: Vec<PaneHit>,
     pub(super) popup: Option<PaneHit>,
+    pub(super) dock: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
@@ -194,6 +195,17 @@ pub(super) struct ShellHitMap {
     pub(super) release_notes_max_scroll: usize,
 }
 
+/// What a clickable terminal rect belongs to.
+///
+/// A popup and a dock are both addressed by terminal id rather than pane id, but
+/// only the popup is modal, so the two cannot share one flag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PaneHitKind {
+    Pane,
+    Popup,
+    Dock,
+}
+
 #[derive(Clone)]
 pub(super) struct PaneHit {
     pub(super) rect: Rect,
@@ -201,7 +213,7 @@ pub(super) struct PaneHit {
     pub(super) scrollbar_rect: Option<Rect>,
     pub(super) scroll: Option<crate::pane::ScrollMetrics>,
     pub(super) pane_id: String,
-    pub(super) popup: bool,
+    pub(super) kind: PaneHitKind,
     pub(super) mouse_reporting: bool,
     pub(super) sgr_pixel_mouse: bool,
     pub(super) pixel_width: u32,
@@ -787,6 +799,8 @@ pub(super) struct ClientVisibleNotification {
 pub(super) enum ClientInputTarget {
     Pane(String),
     Popup(String),
+    /// Named by terminal id, because the dock is not a pane of any tab.
+    Dock(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -956,6 +970,12 @@ pub(crate) struct ClientShellState {
     pub(super) input_leases: ClientInputLeases,
     pub(super) popup_pending: bool,
     pub(super) popup_pending_deadline: Option<std::time::Instant>,
+    /// Set by a click inside the dock, cleared by a click anywhere else. The
+    /// dock is not modal, so it holds the keyboard only while this is true.
+    pub(super) dock_focused: bool,
+    /// Latest dock geometry the server sent. It arrives in its own message,
+    /// just before the pane surface that paints the dock.
+    pub(super) dock_surface: Option<crate::protocol::ClientShellDockSurface>,
     pub(super) next_request_id: u64,
     pub(super) pending_requests: HashMap<String, PendingEndpointRequest>,
     pub(super) pending_integration_installs: usize,
@@ -1111,6 +1131,8 @@ impl ClientShellState {
             input_leases: ClientInputLeases::default(),
             popup_pending: false,
             popup_pending_deadline: None,
+            dock_focused: false,
+            dock_surface: None,
             next_request_id: 1,
             pending_requests: HashMap::new(),
             pending_integration_installs: 0,
@@ -1579,6 +1601,13 @@ impl ClientShellState {
         self.pane_surface.is_some()
     }
 
+    pub(crate) fn set_dock_surface(
+        &mut self,
+        dock: Option<crate::protocol::ClientShellDockSurface>,
+    ) {
+        self.dock_surface = dock;
+    }
+
     pub(crate) fn set_pane_surface(&mut self, surface: PaneSurfaceFrame) {
         let Some(snapshot) = self.snapshot.as_ref() else {
             return;
@@ -1666,7 +1695,8 @@ impl ClientShellState {
             self.workspace_press = None;
             self.tab_press = None;
             if self.pane_mouse_gesture.as_ref().is_some_and(|gesture| {
-                gesture.hit.popup && previous_popup.as_deref() == Some(gesture.hit.pane_id.as_str())
+                gesture.hit.kind == PaneHitKind::Popup
+                    && previous_popup.as_deref() == Some(gesture.hit.pane_id.as_str())
             }) {
                 self.pane_mouse_gesture = None;
             }

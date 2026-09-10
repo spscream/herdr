@@ -802,18 +802,25 @@ impl ClientShellState {
             if gesture_event {
                 let button = gesture.button;
                 let modifiers = mouse.modifiers.difference(gesture.stripped_modifiers);
-                let hit = if gesture.hit.popup {
-                    self.hits
+                let hit = match gesture.hit.kind {
+                    super::state::PaneHitKind::Popup => self
+                        .hits
                         .popup
                         .as_ref()
                         .filter(|hit| hit.pane_id == gesture.hit.pane_id)
-                        .cloned()
-                } else {
-                    self.hits
+                        .cloned(),
+                    super::state::PaneHitKind::Dock => self
+                        .hits
+                        .dock
+                        .as_ref()
+                        .filter(|hit| hit.pane_id == gesture.hit.pane_id)
+                        .cloned(),
+                    super::state::PaneHitKind::Pane => self
+                        .hits
                         .panes
                         .iter()
                         .find(|hit| hit.pane_id == gesture.hit.pane_id)
-                        .cloned()
+                        .cloned(),
                 }
                 .unwrap_or_else(|| gesture.hit.clone());
                 let position = self.pane_mouse_position(&hit, mouse);
@@ -868,6 +875,46 @@ impl ClientShellState {
         }
         if self.popup_terminal_id.is_some() {
             return;
+        }
+        // The dock is not modal. A press inside it takes the keyboard; a press
+        // anywhere else gives it back. Every other event falls through, so the
+        // panes, the splits and the tab bar keep working while the dock is up.
+        if let Some(hit) = self.hits.dock.clone() {
+            if super::contains(hit.inner_rect, point) {
+                match mouse.kind {
+                    MouseEventKind::Down(button) => {
+                        if !self.dock_focused {
+                            self.dock_focused = true;
+                            outcome.repaint = true;
+                        }
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                        if hit.mouse_reporting {
+                            self.pane_mouse_gesture = Some(ClientPaneMouseGesture {
+                                last_position: self.pane_mouse_position(&hit, mouse),
+                                hit,
+                                button,
+                                stripped_modifiers: crossterm::event::KeyModifiers::empty(),
+                                last_event: mouse,
+                            });
+                        }
+                    }
+                    MouseEventKind::Moved if hit.mouse_reporting => {
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                    }
+                    MouseEventKind::ScrollUp
+                    | MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollLeft
+                    | MouseEventKind::ScrollRight => {
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                    }
+                    MouseEventKind::Up(_) | MouseEventKind::Drag(_) | MouseEventKind::Moved => {}
+                }
+                return;
+            }
+            if matches!(mouse.kind, MouseEventKind::Down(_)) && self.dock_focused {
+                self.dock_focused = false;
+                outcome.repaint = true;
+            }
         }
         if !self.replaying_url_click
             && self.overlay.is_none()
@@ -2284,10 +2331,10 @@ impl ClientShellState {
                 height_px: hit.pixel_height,
             },
         );
-        let target = if hit.popup {
-            ClientInputTarget::Popup(hit.pane_id.clone())
-        } else {
-            ClientInputTarget::Pane(hit.pane_id.clone())
+        let target = match hit.kind {
+            super::state::PaneHitKind::Popup => ClientInputTarget::Popup(hit.pane_id.clone()),
+            super::state::PaneHitKind::Dock => ClientInputTarget::Dock(hit.pane_id.clone()),
+            super::state::PaneHitKind::Pane => ClientInputTarget::Pane(hit.pane_id.clone()),
         };
         push_target_event(
             target,

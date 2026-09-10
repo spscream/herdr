@@ -248,6 +248,7 @@ pub(super) struct RenderedPaneSurface {
     pub(super) panes: Vec<protocol::PaneSurfacePane>,
     pub(super) splits: Vec<protocol::PaneSurfaceSplit>,
     pub(super) popup: Option<Box<protocol::ClientShellPopupSurface>>,
+    pub(super) dock: Option<protocol::ClientShellDockSurface>,
     pub(super) graphics: protocol::SurfaceGraphicsScene,
     pub(super) graphics_delivery: crate::kitty_graphics::surface::DeliveryCache,
 }
@@ -398,14 +399,51 @@ pub(super) fn render_pane_surface(
         graphics_delivery,
         client_id,
     );
+    let dock = dock_surface(app, target, layout.dock_rect, cell_size);
     RenderedPaneSurface {
         frame: FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, cursor, &hyperlinks),
         panes,
         splits,
         popup,
+        dock,
         graphics,
         graphics_delivery: next_graphics_delivery,
     }
+}
+
+/// Describes the dock column for the client shell.
+///
+/// The dock's cells are already inside the pane-surface buffer, so this reports
+/// geometry and terminal flags only. Input is addressed by terminal id, because
+/// the dock is deliberately absent from the tab's pane tree.
+fn dock_surface(
+    app: &app::App,
+    target: Option<crate::ui::TabSurfaceTarget>,
+    dock_rect: Option<Rect>,
+    cell_size: crate::kitty_graphics::HostCellSize,
+) -> Option<protocol::ClientShellDockSurface> {
+    let outer = dock_rect?;
+    let workspace = app.state.workspaces.get(target?.workspace_index)?;
+    let dock_pane = workspace.dock_pane.as_ref()?;
+    let (_outer, inner) = crate::ui::dock_pane_rects_from_outer(outer)?;
+    let runtime = app.terminal_runtimes.get(&dock_pane.terminal_id);
+    let (pixel_width, pixel_height) = if cell_size.is_known() {
+        (
+            u32::from(inner.width) * cell_size.width_px,
+            u32::from(inner.height) * cell_size.height_px,
+        )
+    } else {
+        (0, 0)
+    };
+    Some(protocol::ClientShellDockSurface {
+        terminal_id: dock_pane.terminal_id.to_string(),
+        rect: outer.into(),
+        inner_rect: inner.into(),
+        mouse_reporting: runtime.is_some_and(|runtime| runtime.mouse_reporting_enabled()),
+        sgr_pixel_mouse: runtime.is_some_and(|runtime| runtime.sgr_pixel_mouse_enabled()),
+        pixel_width,
+        pixel_height,
+    })
 }
 
 fn render_popup_surface(
@@ -542,6 +580,91 @@ fn split_hit_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds an app whose only workspace shows a dock holding one terminal.
+    /// The terminal is registered by hand, exactly as the popup tests do, so no
+    /// process is spawned.
+    fn app_with_dock_pane() -> (crate::app::App, crate::terminal::TerminalId) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = crate::config::Config::default();
+        config.ui.dock = crate::dock::DockConfig {
+            enabled: true,
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+        };
+        let mut app = crate::app::App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("dock")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let terminal_id = crate::terminal::TerminalId::alloc();
+        app.state.terminals.insert(
+            terminal_id.clone(),
+            crate::terminal::TerminalState::new(
+                terminal_id.clone(),
+                std::path::PathBuf::from("/dock"),
+            ),
+        );
+        app.state.workspaces[0].dock_pane = Some(crate::dock::DockPaneState {
+            pane_id: crate::layout::PaneId::alloc(),
+            terminal_id: terminal_id.clone(),
+        });
+        (app, terminal_id)
+    }
+
+    fn render_dock_for_test(app: &mut crate::app::App) -> Option<protocol::ClientShellDockSurface> {
+        render_pane_surface(
+            app,
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: 0,
+            }),
+            Rect::new(0, 0, 100, 30),
+            false,
+            false,
+            crate::kitty_graphics::HostCellSize::default(),
+            &crate::kitty_graphics::surface::DeliveryCache::default(),
+            1,
+        )
+        .dock
+    }
+
+    #[test]
+    fn the_client_surface_reports_the_dock_column_it_can_click() {
+        let (mut app, terminal_id) = app_with_dock_pane();
+
+        let dock = render_dock_for_test(&mut app).expect("the surface must describe the dock");
+
+        assert_eq!(dock.terminal_id, terminal_id.to_string());
+        assert_eq!(
+            (dock.rect.x, dock.rect.width),
+            (68, 32),
+            "the dock sits at the right edge of the area"
+        );
+        assert_eq!(
+            (dock.inner_rect.x, dock.inner_rect.width),
+            (69, 30),
+            "and the clickable part is inside its border"
+        );
+    }
+
+    #[test]
+    fn a_collapsed_dock_is_absent_from_the_client_surface() {
+        let (mut app, _terminal_id) = app_with_dock_pane();
+        if let Some(dock) = app.state.dock.as_mut() {
+            dock.collapsed = true;
+        }
+
+        assert!(
+            render_dock_for_test(&mut app).is_none(),
+            "a collapsed dock gives the client nothing to click"
+        );
+    }
 
     #[test]
     fn snapshot_projects_cached_release_and_update_facts() {

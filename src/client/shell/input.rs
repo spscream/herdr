@@ -361,10 +361,10 @@ impl ClientShellState {
                 width_px: gesture.hit.pixel_width,
                 height_px: gesture.hit.pixel_height,
             });
-            let target = if gesture.hit.popup {
-                ClientInputTarget::Popup(gesture.hit.pane_id)
-            } else {
-                ClientInputTarget::Pane(gesture.hit.pane_id)
+            let target = match gesture.hit.kind {
+                super::state::PaneHitKind::Popup => ClientInputTarget::Popup(gesture.hit.pane_id),
+                super::state::PaneHitKind::Dock => ClientInputTarget::Dock(gesture.hit.pane_id),
+                super::state::PaneHitKind::Pane => ClientInputTarget::Pane(gesture.hit.pane_id),
             };
             super::push_target_event(
                 target,
@@ -559,7 +559,7 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
-                self.focused_pane_id().map(ClientInputTarget::Pane)
+                self.terminal_input_target()
             }
             ClientShellMode::Prefix => {
                 let return_mode = if self.copy_mode.as_ref().is_some_and(|copy_mode| {
@@ -572,7 +572,7 @@ impl ClientShellState {
                 if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix) {
                     self.mode = return_mode;
                     outcome.repaint = true;
-                    return self.focused_pane_id().map(ClientInputTarget::Pane);
+                    return self.terminal_input_target();
                 }
                 if key.code == KeyCode::Esc {
                     self.mode = return_mode;
@@ -936,7 +936,7 @@ impl ClientShellState {
             overlay: self.overlay.as_ref().map(ClientShellOverlay::kind),
             popup_terminal_id: self.popup_input_target().and_then(|target| match target {
                 ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-                ClientInputTarget::Pane(_) => None,
+                ClientInputTarget::Pane(_) | ClientInputTarget::Dock(_) => None,
             }),
             popup_pending: self.popup_pending,
             retained_selection: self
@@ -971,7 +971,7 @@ impl ClientShellState {
         }
         if let Some(terminal_id) = self.popup_input_target().and_then(|target| match target {
             ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-            ClientInputTarget::Pane(_) => None,
+            ClientInputTarget::Pane(_) | ClientInputTarget::Dock(_) => None,
         }) {
             return Some(crate::protocol::ClientClipboardImageTarget::Popup(
                 terminal_id,
@@ -982,6 +982,20 @@ impl ClientShellState {
         }
         self.focused_pane_id()
             .map(crate::protocol::ClientClipboardImageTarget::Pane)
+    }
+
+    /// Where an ordinary keystroke goes in terminal mode.
+    ///
+    /// The dock takes it only while a click has focused it and the dock is still
+    /// on screen. Requiring the hit means a collapse or a workspace switch hands
+    /// the keyboard back to the pane without any separate reset.
+    fn terminal_input_target(&self) -> Option<ClientInputTarget> {
+        if self.dock_focused {
+            if let Some(hit) = self.hits.dock.as_ref() {
+                return Some(ClientInputTarget::Dock(hit.pane_id.clone()));
+            }
+        }
+        self.focused_pane_id().map(ClientInputTarget::Pane)
     }
 
     fn popup_input_target(&self) -> Option<ClientInputTarget> {

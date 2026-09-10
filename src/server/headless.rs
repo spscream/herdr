@@ -1062,7 +1062,8 @@ impl HeadlessServer {
                     };
                     apply_client_pane_input_events(runtime, &[held.release])
                 }
-                ClientShellInputTarget::Popup(terminal_id) => {
+                ClientShellInputTarget::Popup(terminal_id)
+                | ClientShellInputTarget::Dock(terminal_id) => {
                     let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
                         continue;
                     };
@@ -2439,6 +2440,72 @@ impl HeadlessServer {
                     warn!(client_id, pane_id, err = %err, "targeted client shell input failed");
                 }
                 foreground_changed | geometry_changed || runtime.scroll_metrics() != scroll_before
+            }
+            ServerEvent::ClientShellDockInput {
+                client_id,
+                terminal_id,
+                events,
+            } => {
+                if self.handoff_in_progress
+                    || !self
+                        .clients
+                        .get(&client_id)
+                        .is_some_and(ClientConnection::is_active_shell_client)
+                {
+                    return false;
+                }
+                let pixel_mouse = self.clients.get(&client_id).is_some_and(|client| {
+                    client.pixel_mouse && client.host_sgr_pixels_active == Some(true)
+                });
+                let mut events = events;
+                // The dock belongs to the workspace the client is looking at, so
+                // the terminal named by the client must be that workspace's dock
+                // and no other. A stale id from a workspace switch is dropped.
+                let Some(workspace_index) = self
+                    .shell_target_for_client(client_id)
+                    .map(|target| target.workspace_index)
+                else {
+                    return false;
+                };
+                let Some(dock_terminal_id) = self
+                    .app
+                    .state
+                    .workspaces
+                    .get(workspace_index)
+                    .and_then(|workspace| workspace.dock_pane.as_ref())
+                    .map(|dock| dock.terminal_id.clone())
+                else {
+                    return false;
+                };
+                if dock_terminal_id.as_str() != terminal_id {
+                    return false;
+                }
+                let Some(runtime) = self.app.terminal_runtimes.get(&dock_terminal_id) else {
+                    return false;
+                };
+                super::pane_input::downgrade_ineligible_pixel_mouse(
+                    &mut events,
+                    pixel_mouse,
+                    runtime.current_size(),
+                    runtime.pixel_size(),
+                );
+                let interaction = client_pane_input_has_interaction(&events);
+                if let Some(client) = self.clients.get_mut(&client_id) {
+                    client.track_shell_input(
+                        ClientShellInputTarget::Dock(terminal_id.clone()),
+                        &events,
+                    );
+                }
+                let foreground_changed =
+                    interaction && self.promote_client_to_foreground(client_id);
+                let Some(runtime) = self.app.terminal_runtimes.get(&dock_terminal_id) else {
+                    return foreground_changed;
+                };
+                let scroll_before = runtime.scroll_metrics();
+                if let Err(err) = apply_client_popup_input_events(runtime, &events) {
+                    warn!(client_id, terminal_id, err = %err, "targeted client dock input failed");
+                }
+                foreground_changed || runtime.scroll_metrics() != scroll_before
             }
             ServerEvent::ClientShellPopupInput {
                 client_id,

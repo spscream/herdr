@@ -212,13 +212,38 @@ impl ClientShellState {
                     viewport_rows: usize::try_from(metrics.viewport_rows).unwrap_or(usize::MAX),
                 }),
                 pane_id: pane.pane_id.clone(),
-                popup: false,
+                kind: super::state::PaneHitKind::Pane,
                 mouse_reporting: pane.mouse_reporting,
                 sgr_pixel_mouse: pane.sgr_pixel_mouse,
                 pixel_width: pane.pixel_width,
                 pixel_height: pane.pixel_height,
             })
             .collect();
+        // The dock's cells arrive inside the pane-surface frame, so only its hit
+        // geometry has to be rebuilt here. `pane_id` carries the terminal id,
+        // exactly as the popup hit does, because neither is a pane of a tab.
+        self.hits.dock = self.dock_surface.as_ref().map(|dock| PaneHit {
+            rect: Rect::new(
+                layout.pane_surface.x.saturating_add(dock.rect.x),
+                layout.pane_surface.y.saturating_add(dock.rect.y),
+                dock.rect.width,
+                dock.rect.height,
+            ),
+            inner_rect: Rect::new(
+                layout.pane_surface.x.saturating_add(dock.inner_rect.x),
+                layout.pane_surface.y.saturating_add(dock.inner_rect.y),
+                dock.inner_rect.width,
+                dock.inner_rect.height,
+            ),
+            scrollbar_rect: None,
+            scroll: None,
+            pane_id: dock.terminal_id.clone(),
+            kind: super::state::PaneHitKind::Dock,
+            mouse_reporting: dock.mouse_reporting,
+            sgr_pixel_mouse: dock.sgr_pixel_mouse,
+            pixel_width: dock.pixel_width,
+            pixel_height: dock.pixel_height,
+        });
         let topology_signature = pane_surface_topology_signature(surface);
         self.hits.pane_splits = surface
             .splits
@@ -511,7 +536,7 @@ impl ClientShellState {
                     scrollbar_rect: None,
                     scroll: None,
                     pane_id: popup.terminal_id.clone(),
-                    popup: true,
+                    kind: super::state::PaneHitKind::Popup,
                     mouse_reporting: popup.mouse_reporting,
                     sgr_pixel_mouse: popup.sgr_pixel_mouse,
                     pixel_width: popup.pixel_width,
@@ -561,6 +586,7 @@ impl ClientShellState {
             self.hits.panes.clear();
             self.hits.pane_splits.clear();
             self.hits.popup = None;
+            self.hits.dock = None;
         }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         if let Some(overlay) = self.overlay.as_ref() {
@@ -633,6 +659,7 @@ impl ClientShellState {
             self.hits.panes.clear();
             self.hits.pane_splits.clear();
             self.hits.popup = None;
+            self.hits.dock = None;
         }
         self.compose_graphics(&mut frame, layout);
         Some(frame)

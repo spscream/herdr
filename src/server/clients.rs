@@ -28,6 +28,9 @@ pub(crate) type RenderTarget = (
 pub(crate) enum ClientShellInputTarget {
     Pane(String),
     Popup(String),
+    /// Addressed by terminal id, like the popup, because the dock is not a pane
+    /// of any tab.
+    Dock(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -143,6 +146,9 @@ pub(crate) struct ClientConnection {
     pub(crate) render_state: ClientRenderState,
     /// Image assets already included in the selected ClientShell scene.
     pub(crate) shell_graphics_delivery: crate::kitty_graphics::surface::DeliveryCache,
+    /// Last dock geometry sent to this client. The dock rides its own message,
+    /// so it is only resent when it actually changes.
+    pub(crate) shell_dock: Option<crate::protocol::ClientShellDockSurface>,
     /// Passive eligibility for audited local Kitty regular-file graphics.
     pub(crate) direct_graphics: bool,
     /// Whether this frontend preserves exact SGR pixel reports.
@@ -227,6 +233,7 @@ impl ClientConnection {
             last_activity,
             render_state: ClientRenderState::new(render_encoding),
             shell_graphics_delivery: crate::kitty_graphics::surface::DeliveryCache::default(),
+            shell_dock: None,
             direct_graphics: false,
             pixel_mouse: false,
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),

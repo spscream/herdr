@@ -430,7 +430,7 @@ pub(crate) fn dock_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)
 }
 
 /// Inner rectangle for a dock whose outer rectangle is already known.
-pub(super) fn dock_pane_rects_from_outer(outer: Rect) -> Option<(Rect, Rect)> {
+pub(crate) fn dock_pane_rects_from_outer(outer: Rect) -> Option<(Rect, Rect)> {
     Some((outer, pane_inner_rect(outer, Borders::ALL)))
 }
 

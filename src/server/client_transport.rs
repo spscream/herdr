@@ -487,6 +487,12 @@ pub(crate) enum ServerEvent {
         terminal_id: String,
         events: Vec<ClientPaneInputEvent>,
     },
+    /// A client-owned shell delivered semantic input to its workspace dock.
+    ClientShellDockInput {
+        client_id: u64,
+        terminal_id: String,
+        events: Vec<ClientPaneInputEvent>,
+    },
     /// A client-owned shell published one host terminal theme observation.
     ClientShellHostTheme {
         client_id: u64,
@@ -1217,6 +1223,50 @@ fn client_read_loop_with_endpoint_controls(
                         size,
                         max = MAX_INPUT_PAYLOAD,
                         "oversized popup input, closing"
+                    );
+                    let _ = server_event_tx
+                        .blocking_send(ServerEvent::ClientDisconnected { client_id });
+                    break;
+                }
+            },
+            ClientMessage::ClientShellDockInput {
+                terminal_id,
+                events,
+            } => match pane_input_event_limit(&events) {
+                InputEventLimit::WithinLimits => ServerEvent::ClientShellDockInput {
+                    client_id,
+                    terminal_id,
+                    events,
+                },
+                InputEventLimit::TooManyEvents => {
+                    warn!(
+                        client_id,
+                        count = events.len(),
+                        "oversized dock input batch, closing"
+                    );
+                    let _ = server_event_tx
+                        .blocking_send(ServerEvent::ClientDisconnected { client_id });
+                    break;
+                }
+                InputEventLimit::PasteTooLarge { size } => {
+                    warn!(
+                        client_id,
+                        size,
+                        max = MAX_INPUT_PAYLOAD,
+                        "oversized dock paste, rejecting"
+                    );
+                    ServerEvent::ClientPasteRejected {
+                        client_id,
+                        size,
+                        max: MAX_INPUT_PAYLOAD,
+                    }
+                }
+                InputEventLimit::InputPayloadTooLarge { size } => {
+                    warn!(
+                        client_id,
+                        size,
+                        max = MAX_INPUT_PAYLOAD,
+                        "oversized dock input, closing"
                     );
                     let _ = server_event_tx
                         .blocking_send(ServerEvent::ClientDisconnected { client_id });

@@ -133,6 +133,28 @@ fn surface() -> PaneSurfaceFrame {
     }
 }
 
+pub(super) fn dock_surface() -> crate::protocol::ClientShellDockSurface {
+    crate::protocol::ClientShellDockSurface {
+        terminal_id: "terminal-dock".into(),
+        rect: SurfaceRect {
+            x: 74,
+            y: 0,
+            width: 32,
+            height: 18,
+        },
+        inner_rect: SurfaceRect {
+            x: 75,
+            y: 1,
+            width: 30,
+            height: 16,
+        },
+        mouse_reporting: false,
+        sgr_pixel_mouse: false,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
 fn pane_scroll_result(
     offset_from_bottom: u64,
     max_offset_from_bottom: u64,
@@ -211,6 +233,7 @@ fn surface_with_popup() -> PaneSurfaceFrame {
 mod agents_worktrees_notifications;
 mod chrome_context;
 mod copy;
+mod dock;
 mod endpoint_requests;
 mod endpoints;
 #[path = "input.rs"]

@@ -620,6 +620,15 @@ pub enum ClientMessage {
     /// This variant is append-only. Its bincode tag and two-string payload are part
     /// of endpoint generation 1 and must not change.
     EndpointControl { kind: String, data: String },
+
+    /// Deliver client-classified semantic input to the focused workspace dock.
+    ///
+    /// Appended last on purpose: a variant inserted beside `ClientShellPopupInput`
+    /// would shift the bincode tag of every message after it.
+    ClientShellDockInput {
+        terminal_id: String,
+        events: Vec<ClientPaneInputEvent>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1224,6 +1233,24 @@ pub struct PaneSurfaceFrame {
     pub graphics: SurfaceGraphicsScene,
 }
 
+/// The workspace dock as the client shell needs to see it.
+///
+/// This travels in its own [`ServerMessage`] rather than inside
+/// [`PaneSurfaceFrame`], because that frame is a frozen generation-1 payload: a
+/// new field there would change its digest, which the codec tests forbid. An
+/// appended enum variant is the sanctioned way to extend the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellDockSurface {
+    /// Input goes to the terminal, because the dock is not a pane of any tab.
+    pub terminal_id: String,
+    pub rect: SurfaceRect,
+    pub inner_rect: SurfaceRect,
+    pub mouse_reporting: bool,
+    pub sgr_pixel_mouse: bool,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientShellPopupSize {
     Cells(u16),
@@ -1446,6 +1473,12 @@ pub enum ServerMessage {
     /// This variant is append-only. Its bincode tag and two-string payload are part
     /// of endpoint generation 1 and must not change.
     EndpointControl { kind: String, data: String },
+
+    /// Hit geometry for the workspace dock column, or `None` when no dock shows.
+    ///
+    /// Sent beside each pane surface. Appended last on purpose: the pane surface
+    /// itself is a frozen generation-1 payload and cannot take a new field.
+    ClientShellDock(Option<ClientShellDockSurface>),
 }
 
 // ---------------------------------------------------------------------------

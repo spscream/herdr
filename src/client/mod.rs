@@ -1278,6 +1278,14 @@ async fn run_client_loop(
                             io::Error::new(io::ErrorKind::InvalidData, message),
                         )));
                     }
+                    ServerMessage::ClientShellDock(dock) => {
+                        // Geometry only. The surface message that follows paints
+                        // the dock and triggers the compose, so nothing is
+                        // rendered here.
+                        if let Some(shell) = &mut state.shell {
+                            shell.set_dock_surface(dock);
+                        }
+                    }
                     ServerMessage::PaneSurface(surface) => {
                         if activation_message {
                             let progress = pending_activation.as_mut().map(|pending| {

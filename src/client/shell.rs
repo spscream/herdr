@@ -95,6 +95,10 @@ fn target_event_message(target: ClientInputTarget, event: ClientPaneInputEvent) 
             terminal_id,
             events: vec![event],
         },
+        ClientInputTarget::Dock(terminal_id) => ClientMessage::ClientShellDockInput {
+            terminal_id,
+            events: vec![event],
+        },
     }
 }
 
@@ -133,6 +137,22 @@ fn push_target_event(
             }
             outcome.requests.push(target_event_message(
                 ClientInputTarget::Popup(terminal_id),
+                event,
+            ));
+        }
+        ClientInputTarget::Dock(terminal_id) => {
+            if let Some(ClientMessage::ClientShellDockInput {
+                terminal_id: pending_terminal,
+                events,
+            }) = outcome.requests.last_mut()
+            {
+                if *pending_terminal == terminal_id {
+                    events.push(event);
+                    return;
+                }
+            }
+            outcome.requests.push(target_event_message(
+                ClientInputTarget::Dock(terminal_id),
                 event,
             ));
         }
