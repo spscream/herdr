@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::popup_size::PopupSize;
 
 /// Which side of the tab area the dock occupies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DockEdge {
     Left,

@@ -1753,6 +1753,18 @@
           ],
           "type": "object"
         },
+        "DockTarget": {
+          "description": "Which workspace's dock a request is about.\n\n`None` means the active workspace, matching `plugin.pane.open`.",
+          "properties": {
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "EmptyParams": {
           "type": "object"
         },
@@ -6135,6 +6147,38 @@
         {
           "properties": {
             "method": {
+              "const": "dock.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/DockTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "dock.close",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/DockTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "events.subscribe",
               "type": "string"
             },
@@ -6873,6 +6917,75 @@
             "failed"
           ],
           "type": "string"
+        },
+        "DockEdge": {
+          "description": "Which side of the tab area the dock occupies.",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        "DockInfo": {
+          "description": "The state of one workspace's dock column.",
+          "properties": {
+            "collapsed": {
+              "description": "True when the column is hidden by `dock.toggle`. The process, if any,\nkeeps running.",
+              "type": "boolean"
+            },
+            "dock_id": {
+              "description": "The identifier of the column itself. Stable while the workspace lives,\nand set in a dock process's `HERDR_DOCK_ID`.",
+              "type": "string"
+            },
+            "edge": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/DockEdge"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Absent when the dock is off: there is then no edge to report, and a\ndefault one would read as a fact."
+            },
+            "enabled": {
+              "description": "False when `[ui.dock]` is off. Every other field then describes nothing.",
+              "type": "boolean"
+            },
+            "occupied": {
+              "description": "True when a process occupies the column right now. A collapsed dock can\nstill be occupied.",
+              "type": "boolean"
+            },
+            "title": {
+              "description": "The title of the running process, or `None` when the column is empty.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Absent when the dock is off, for the same reason as `edge`."
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "dock_id",
+            "enabled",
+            "collapsed",
+            "occupied"
+          ],
+          "type": "object"
         },
         "EventData": {
           "oneOf": [
@@ -9871,6 +9984,22 @@
                 "type",
                 "pane_id",
                 "text"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "dock": {
+                  "$ref": "#/schemas/success_response/$defs/DockInfo"
+                },
+                "type": {
+                  "const": "dock",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "dock"
               ],
               "type": "object"
             },

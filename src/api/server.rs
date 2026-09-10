@@ -475,6 +475,8 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::PaneClose(_) => "pane.close",
         Method::PopupClose(_) => "popup.close",
         Method::DockToggle(_) => "dock.toggle",
+        Method::DockGet(_) => "dock.get",
+        Method::DockClose(_) => "dock.close",
         Method::EventsSubscribe(_) => "events.subscribe",
         Method::EventsWait(_) => "events.wait",
         Method::PaneWaitForOutput(_) => "pane.wait_for_output",

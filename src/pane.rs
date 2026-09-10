@@ -104,6 +104,16 @@ enum PaneLaunchIdentity {
         tab_id: String,
         pane_id: String,
     },
+    /// A process in a workspace's dock column.
+    ///
+    /// The column belongs to a workspace but to no tab, and it is not a pane of
+    /// any split tree. So `HERDR_PANE_ID` and `HERDR_TAB_ID` stay unset: a tool
+    /// that read either would address something no tab tree contains. The dock
+    /// gets its own variable instead.
+    Dock {
+        workspace_id: String,
+        dock_id: String,
+    },
     OmitPane,
 }
 
@@ -133,6 +143,29 @@ impl PaneLaunchEnv {
         self.identity = PaneLaunchIdentity::OmitPane;
         self
     }
+
+    /// The workspace and dock a dock identity names, or `None` for any other.
+    ///
+    /// Exists so a test can prove that a spawn path asks for the dock identity,
+    /// not merely that the identity maps to the right variables.
+    #[cfg(test)]
+    pub(crate) fn dock_identity(&self) -> Option<(&str, &str)> {
+        match &self.identity {
+            PaneLaunchIdentity::Dock {
+                workspace_id,
+                dock_id,
+            } => Some((workspace_id.as_str(), dock_id.as_str())),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn with_dock_identity(mut self, workspace_id: String, dock_id: String) -> Self {
+        self.identity = PaneLaunchIdentity::Dock {
+            workspace_id,
+            dock_id,
+        };
+        self
+    }
 }
 
 fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
@@ -153,6 +186,15 @@ fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
             cmd.env(crate::integration::HERDR_WORKSPACE_ID_ENV_VAR, workspace_id);
             cmd.env(crate::integration::HERDR_TAB_ID_ENV_VAR, tab_id);
             cmd.env(crate::integration::HERDR_PANE_ID_ENV_VAR, pane_id);
+        }
+        PaneLaunchIdentity::Dock {
+            workspace_id,
+            dock_id,
+        } => {
+            cmd.env(crate::integration::HERDR_WORKSPACE_ID_ENV_VAR, workspace_id);
+            cmd.env(crate::integration::HERDR_DOCK_ID_ENV_VAR, dock_id);
+            cmd.env_remove(crate::integration::HERDR_PANE_ID_ENV_VAR);
+            cmd.env_remove(crate::integration::HERDR_TAB_ID_ENV_VAR);
         }
         PaneLaunchIdentity::OmitPane => {
             cmd.env_remove(crate::integration::HERDR_PANE_ID_ENV_VAR);
@@ -3408,6 +3450,54 @@ mod tests {
         apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
 
         assert!(cmd.get_env("CODEX_THREAD_ID").is_none());
+    }
+
+    #[test]
+    fn a_dock_process_learns_its_workspace_and_never_a_pane() {
+        let mut cmd = CommandBuilder::new("shell");
+        // An outer pane's identity, as an ensure hook would inherit it.
+        cmd.env(crate::integration::HERDR_PANE_ID_ENV_VAR, "w1:pB");
+        cmd.env(crate::integration::HERDR_TAB_ID_ENV_VAR, "w1:tA");
+
+        apply_pane_launch_env(
+            &mut cmd,
+            &PaneLaunchEnv::default().with_dock_identity("w1".into(), "w1:dock".into()),
+        );
+
+        assert_eq!(
+            cmd.get_env(crate::integration::HERDR_WORKSPACE_ID_ENV_VAR)
+                .and_then(std::ffi::OsStr::to_str),
+            Some("w1")
+        );
+        assert_eq!(
+            cmd.get_env(crate::integration::HERDR_DOCK_ID_ENV_VAR)
+                .and_then(std::ffi::OsStr::to_str),
+            Some("w1:dock")
+        );
+        // The column is in no tab tree, so an inherited pane or tab identity
+        // would name something the API cannot resolve.
+        assert!(
+            cmd.get_env(crate::integration::HERDR_PANE_ID_ENV_VAR)
+                .is_none(),
+            "a dock is not a pane"
+        );
+        assert!(
+            cmd.get_env(crate::integration::HERDR_TAB_ID_ENV_VAR)
+                .is_none(),
+            "a dock belongs to no tab"
+        );
+    }
+
+    #[test]
+    fn a_pane_process_gets_no_dock_identity() {
+        let mut cmd = CommandBuilder::new("shell");
+        apply_pane_launch_env(
+            &mut cmd,
+            &PaneLaunchEnv::default().with_identity("w1".into(), "w1:tA".into(), "w1:pB".into()),
+        );
+        assert!(cmd
+            .get_env(crate::integration::HERDR_DOCK_ID_ENV_VAR)
+            .is_none());
     }
 
     #[test]

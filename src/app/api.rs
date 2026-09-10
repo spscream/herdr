@@ -1200,6 +1200,8 @@ impl App {
                 self.render_notify.notify_one();
                 return responses::encode_success(request.id, ResponseResult::Ok {});
             }
+            Method::DockGet(params) => return self.handle_dock_get(request.id, params),
+            Method::DockClose(params) => return self.handle_dock_close(request.id, params),
             Method::PaneSendKeys(params) => return self.handle_pane_send_keys(request.id, params),
             Method::IntegrationList(_) => {
                 return self.handle_integration_list(request.id);

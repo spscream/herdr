@@ -37,6 +37,28 @@ impl App {
         ))
     }
 
+    /// The public identifier of `ws_idx`'s dock column.
+    ///
+    /// A workspace has at most one dock, so the identifier carries no number.
+    /// It keeps the `<workspace>:<kind>` shape of a tab or a pane identifier,
+    /// and the `dock` suffix cannot be read as either number form.
+    pub(crate) fn public_dock_id(&self, ws_idx: usize) -> Option<String> {
+        Some(format!("{}:dock", self.state.workspaces.get(ws_idx)?.id))
+    }
+
+    pub(super) fn dock_launch_env(
+        &self,
+        ws_idx: usize,
+        extra_env: Vec<(String, String)>,
+    ) -> Option<crate::pane::PaneLaunchEnv> {
+        Some(
+            crate::pane::PaneLaunchEnv::from_extra(extra_env).with_dock_identity(
+                self.public_workspace_id(ws_idx),
+                self.public_dock_id(ws_idx)?,
+            ),
+        )
+    }
+
     pub(super) fn pane_launch_env(
         &self,
         ws_idx: usize,

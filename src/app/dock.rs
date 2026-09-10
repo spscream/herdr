@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use crate::app::api::responses;
 use crate::app::App;
 use crate::dock::DockPaneState;
 use crate::layout::PaneId;
@@ -14,6 +15,82 @@ use crate::pane::PaneLaunchEnv;
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 
 impl App {
+    /// Answer `dock.get`: what the workspace's dock column is right now.
+    pub(crate) fn handle_dock_get(
+        &mut self,
+        request_id: String,
+        params: crate::api::schema::DockTarget,
+    ) -> String {
+        let Some(ws_idx) = self.dock_target_workspace(params.workspace_id.as_deref()) else {
+            return responses::encode_error(
+                request_id,
+                "workspace_not_found",
+                "workspace not found",
+            );
+        };
+        responses::encode_success(
+            request_id,
+            crate::api::schema::ResponseResult::Dock {
+                dock: self.dock_info(ws_idx),
+            },
+        )
+    }
+
+    /// Answer `dock.close`: stop the process, leave the column configured.
+    pub(crate) fn handle_dock_close(
+        &mut self,
+        request_id: String,
+        params: crate::api::schema::DockTarget,
+    ) -> String {
+        let Some(ws_idx) = self.dock_target_workspace(params.workspace_id.as_deref()) else {
+            return responses::encode_error(
+                request_id,
+                "workspace_not_found",
+                "workspace not found",
+            );
+        };
+        if !self.close_dock_pane(ws_idx) {
+            return responses::encode_error(
+                request_id,
+                "dock_not_open",
+                "the workspace dock holds no process",
+            );
+        }
+        responses::encode_success(request_id, crate::api::schema::ResponseResult::Ok {})
+    }
+
+    /// The workspace a dock request is about: the named one, or the active one.
+    fn dock_target_workspace(&self, workspace_id: Option<&str>) -> Option<usize> {
+        match workspace_id {
+            Some(workspace_id) => self.parse_workspace_id(workspace_id),
+            None => self.state.active,
+        }
+        .filter(|ws_idx| *ws_idx < self.state.workspaces.len())
+    }
+
+    fn dock_info(&self, ws_idx: usize) -> crate::api::schema::DockInfo {
+        let dock_pane = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.dock_pane.as_ref());
+        crate::api::schema::DockInfo {
+            workspace_id: self.public_workspace_id(ws_idx),
+            dock_id: self.public_dock_id(ws_idx).unwrap_or_default(),
+            enabled: self.state.dock.is_some(),
+            collapsed: self.state.dock_collapsed(),
+            edge: self.state.dock.map(|dock| dock.edge),
+            width: self.state.dock.map(|dock| dock.width),
+            title: dock_pane.and_then(|dock| {
+                self.state
+                    .terminals
+                    .get(&dock.terminal_id)
+                    .and_then(|terminal| terminal.manual_label.clone())
+            }),
+            occupied: dock_pane.is_some(),
+        }
+    }
+
     /// Close the dock process of `ws_idx`. Returns false when it had none.
     pub(crate) fn close_dock_pane(&mut self, ws_idx: usize) -> bool {
         let Some(dock) = self
@@ -107,7 +184,11 @@ impl App {
         let (rows, cols) = self.dock_inner_size();
         let pane_id = PaneId::alloc();
         let terminal_id = TerminalId::alloc();
-        let launch_env = PaneLaunchEnv::from_extra(extra_env).without_pane_identity();
+        // The column is not a pane, so it takes the dock identity rather than
+        // a pane's: the workspace it serves, and the dock's own identifier.
+        let launch_env = self
+            .dock_launch_env(ws_idx, extra_env)
+            .ok_or_else(|| std::io::Error::other("no such workspace"))?;
         let (runtime, launch_argv) = spawn(pane_id, rows, cols, cwd.clone(), &launch_env, self)?;
         let terminal = match launch_argv {
             Some(argv) => TerminalState::new(terminal_id.clone(), cwd).with_launch_argv(argv),
@@ -203,6 +284,176 @@ mod tests {
 
         toggle(&mut app);
         assert_eq!(dock_width(&app), Some(32), "and toggling again restores it");
+    }
+
+    /// Put a process in the dock without a PTY: `dock.get` reads state only.
+    fn occupy_dock(app: &mut App, title: &str) -> crate::terminal::TerminalId {
+        let terminal_id = crate::terminal::TerminalId::alloc();
+        let mut terminal = crate::terminal::TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal.set_manual_label(title.to_string());
+        app.state.terminals.insert(terminal_id.clone(), terminal);
+        app.state.workspaces[0].dock_pane = Some(crate::dock::DockPaneState {
+            pane_id: crate::layout::PaneId::alloc(),
+            terminal_id: terminal_id.clone(),
+        });
+        terminal_id
+    }
+
+    fn get(app: &mut App, workspace_id: Option<&str>) -> String {
+        app.handle_api_request(Request {
+            id: "dock-get".into(),
+            method: Method::DockGet(crate::api::schema::DockTarget {
+                workspace_id: workspace_id.map(str::to_string),
+            }),
+        })
+    }
+
+    fn dock_of(response: &str) -> crate::api::schema::DockInfo {
+        let response: crate::api::schema::SuccessResponse = serde_json::from_str(response).unwrap();
+        match response.result {
+            ResponseResult::Dock { dock } => dock,
+            other => panic!("expected a dock result, got {other:?}"),
+        }
+    }
+
+    // The test runtime spawns a compression task, which needs a reactor.
+    #[tokio::test]
+    async fn the_spawn_path_asks_for_the_dock_identity() {
+        let mut app = app_with_dock(true);
+        let seen = std::cell::RefCell::new(None);
+        let keep_alive = std::cell::RefCell::new(None);
+
+        app.spawn_dock_command(
+            0,
+            None,
+            Vec::new(),
+            |_pane_id, rows, cols, _cwd, env, _app| {
+                *seen.borrow_mut() = env
+                    .dock_identity()
+                    .map(|(workspace, dock)| (workspace.to_string(), dock.to_string()));
+                let (runtime, rx) = crate::terminal::TerminalRuntime::test_with_channel(cols, rows);
+                *keep_alive.borrow_mut() = Some(rx);
+                Ok((runtime, None))
+            },
+        )
+        .expect("the dock spawns");
+
+        // Asking `apply_pane_launch_env` directly proves the mapping only. This
+        // proves the spawn path chose the dock identity over a pane's.
+        assert_eq!(
+            seen.into_inner(),
+            Some((
+                app.public_workspace_id(0),
+                format!("{}:dock", app.public_workspace_id(0))
+            ))
+        );
+    }
+
+    #[test]
+    fn an_empty_dock_reports_the_column_without_a_process() {
+        let mut app = app_with_dock(true);
+        let dock = dock_of(&get(&mut app, None));
+
+        assert!(dock.enabled);
+        assert!(!dock.occupied, "nothing runs in the column yet");
+        assert_eq!(dock.title, None);
+        assert_eq!(dock.edge, Some(crate::dock::DockEdge::Right));
+        assert_eq!(dock.width, Some(crate::popup_size::PopupSize::Cells(32)));
+        assert_eq!(dock.dock_id, format!("{}:dock", dock.workspace_id));
+    }
+
+    #[test]
+    fn an_occupied_dock_reports_the_title_of_its_process() {
+        let mut app = app_with_dock(true);
+        occupy_dock(&mut app, "Explorer");
+
+        let dock = dock_of(&get(&mut app, None));
+        assert!(dock.occupied);
+        assert_eq!(dock.title.as_deref(), Some("Explorer"));
+    }
+
+    #[test]
+    fn a_dock_that_is_off_reports_no_edge_and_no_width() {
+        let mut app = app_with_dock(false);
+        let dock = dock_of(&get(&mut app, None));
+
+        assert!(!dock.enabled);
+        // A default edge here would read as a fact about a column that does
+        // not exist.
+        assert_eq!(dock.edge, None);
+        assert_eq!(dock.width, None);
+    }
+
+    #[test]
+    fn a_collapsed_dock_is_still_reported_as_occupied() {
+        let mut app = app_with_dock(true);
+        occupy_dock(&mut app, "Explorer");
+        toggle(&mut app);
+
+        let dock = dock_of(&get(&mut app, None));
+        assert!(dock.collapsed);
+        assert!(
+            dock.occupied,
+            "collapsing hides the column; the process keeps running"
+        );
+    }
+
+    #[test]
+    fn a_named_workspace_is_reported_instead_of_the_active_one() {
+        let mut app = app_with_dock(true);
+        app.state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("second"));
+        let second = app.public_workspace_id(1);
+
+        let dock = dock_of(&get(&mut app, Some(&second)));
+        assert_eq!(dock.workspace_id, second);
+        assert_ne!(dock.workspace_id, app.public_workspace_id(0));
+    }
+
+    #[test]
+    fn an_unknown_workspace_is_refused() {
+        let mut app = app_with_dock(true);
+        let response = get(&mut app, Some("w_9999"));
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(response.error.code, "workspace_not_found");
+    }
+
+    fn close(app: &mut App) -> String {
+        app.handle_api_request(Request {
+            id: "dock-close".into(),
+            method: Method::DockClose(crate::api::schema::DockTarget::default()),
+        })
+    }
+
+    #[test]
+    fn closing_the_dock_stops_the_process_and_keeps_the_column() {
+        let mut app = app_with_dock(true);
+        let terminal_id = occupy_dock(&mut app, "Explorer");
+
+        let response: crate::api::schema::SuccessResponse =
+            serde_json::from_str(&close(&mut app)).unwrap();
+        assert_eq!(response.result, ResponseResult::Ok {});
+
+        assert!(app.state.workspaces[0].dock_pane.is_none());
+        assert!(
+            !app.state.terminals.contains_key(&terminal_id),
+            "the terminal goes with the process"
+        );
+        assert_eq!(
+            dock_width(&app),
+            Some(32),
+            "closing the process does not give up the column"
+        );
+        assert!(dock_of(&get(&mut app, None)).enabled);
+    }
+
+    #[test]
+    fn closing_an_empty_dock_is_refused() {
+        let mut app = app_with_dock(true);
+        let response = close(&mut app);
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(response.error.code, "dock_not_open");
     }
 
     #[test]

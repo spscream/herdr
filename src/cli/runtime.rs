@@ -105,6 +105,14 @@ pub(super) fn dock_toggle() -> std::io::Result<i32> {
     )
 }
 
+pub(super) fn dock_get(params: crate::api::schema::DockTarget) -> std::io::Result<i32> {
+    print_method_response("cli:dock:get", Method::DockGet(params))
+}
+
+pub(super) fn dock_close(params: crate::api::schema::DockTarget) -> std::io::Result<i32> {
+    print_method_response("cli:dock:close", Method::DockClose(params))
+}
+
 pub(super) fn pane_rename(params: PaneRenameParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:rename", Method::PaneRename(params))
 }

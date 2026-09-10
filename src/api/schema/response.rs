@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::agents::AgentInfo;
 use super::common::{ClientWindowTitleReason, NotificationShowReason};
+use super::dock::DockInfo;
 use super::events::EventEnvelope;
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
@@ -165,6 +166,9 @@ pub enum ResponseResult {
     PaneSelection {
         pane_id: String,
         text: String,
+    },
+    Dock {
+        dock: DockInfo,
     },
     PaneCopyMotion {
         pane_id: String,

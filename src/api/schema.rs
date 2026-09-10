@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub mod agents;
 pub mod commands;
 pub mod common;
+pub mod dock;
 pub mod events;
 pub mod integrations;
 pub mod panes;
@@ -17,6 +18,7 @@ pub mod worktrees;
 pub use agents::*;
 pub use commands::*;
 pub use common::*;
+pub use dock::*;
 pub use events::*;
 pub use integrations::*;
 pub use panes::*;
@@ -232,6 +234,10 @@ pub enum Method {
     PopupClose(EmptyParams),
     #[serde(rename = "dock.toggle")]
     DockToggle(EmptyParams),
+    #[serde(rename = "dock.get")]
+    DockGet(DockTarget),
+    #[serde(rename = "dock.close")]
+    DockClose(DockTarget),
     #[serde(rename = "events.subscribe")]
     EventsSubscribe(EventsSubscribeParams),
     #[serde(rename = "events.wait")]

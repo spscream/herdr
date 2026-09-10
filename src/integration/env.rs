@@ -8,6 +8,11 @@ use portable_pty::CommandBuilder;
 pub(crate) const HERDR_PANE_ID_ENV_VAR: &str = "HERDR_PANE_ID";
 pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
 pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
+/// Set only inside a dock column, and never beside `HERDR_PANE_ID`.
+///
+/// A dock is not a pane of any tab, so a process there has no pane to name.
+/// A plugin reads this to learn that it runs in the column, and which one.
+pub(crate) const HERDR_DOCK_ID_ENV_VAR: &str = "HERDR_DOCK_ID";
 
 pub(crate) const PI_CODING_AGENT_DIR_ENV_VAR: &str = "PI_CODING_AGENT_DIR";
 pub(crate) const OMP_CONFIG_DIR_ENV_VAR: &str = "PI_CONFIG_DIR";

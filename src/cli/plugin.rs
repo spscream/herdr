@@ -678,6 +678,7 @@ fn required_value(args: &[String], index: &mut usize, flag: &str) -> Option<Stri
 fn parse_pane_placement(value: &str) -> Option<PluginPanePlacement> {
     match value {
         "overlay" => Some(PluginPanePlacement::Overlay),
+        "dock" => Some(PluginPanePlacement::Dock),
         "popup" => Some(PluginPanePlacement::Popup),
         "split" => Some(PluginPanePlacement::Split),
         "tab" => Some(PluginPanePlacement::Tab),
@@ -1663,7 +1664,7 @@ fn print_plugin_action_help() {
 
 fn print_plugin_pane_help() {
     eprintln!("herdr plugin pane commands:");
-    eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
+    eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|dock|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
     eprintln!("  herdr plugin pane focus <pane_id>");
     eprintln!("  herdr plugin pane close <pane_id>");
 }
@@ -1671,6 +1672,27 @@ fn print_plugin_pane_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_placement_the_manifest_accepts_is_also_a_cli_word() {
+        // The manifest and the `--placement` flag are two doors to one enum.
+        // A placement the parser omits is unreachable from the command line
+        // while the manifest still offers it.
+        for (word, placement) in [
+            ("overlay", PluginPanePlacement::Overlay),
+            ("dock", PluginPanePlacement::Dock),
+            ("popup", PluginPanePlacement::Popup),
+            ("split", PluginPanePlacement::Split),
+            ("tab", PluginPanePlacement::Tab),
+            ("zoomed", PluginPanePlacement::Zoomed),
+        ] {
+            assert_eq!(
+                parse_pane_placement(word),
+                Some(placement),
+                "--placement {word} must parse"
+            );
+        }
+    }
 
     fn unique_plugin_id(label: &str) -> String {
         let nanos = SystemTime::now()
