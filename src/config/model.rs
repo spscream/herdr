@@ -964,6 +964,8 @@ pub struct UiConfig {
     pub status_indicators: StatusIndicatorStyle,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
+    /// Column reserved along one edge of the tab area for a dock.
+    pub dock: crate::dock::DockConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -1187,6 +1189,7 @@ impl Default for UiConfig {
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
+            dock: crate::dock::DockConfig::default(),
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),

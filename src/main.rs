@@ -21,6 +21,7 @@ mod client;
 mod config;
 mod copy_mode;
 mod detect;
+mod dock;
 mod events;
 mod ghostty;
 mod handoff_runtime;
@@ -300,6 +301,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
+
+# Reserve a column along one edge of the tab area for a dock.
+# The dock is not a pane: it never appears in a tab's split tree, so splitting,
+# closing, and zooming panes leave it alone. Every tab of a workspace shares it.
+# [ui.dock]
+# enabled = false
+# edge = "right"
+# width = 32
 
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false

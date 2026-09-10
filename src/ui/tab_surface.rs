@@ -1,4 +1,8 @@
-use ratatui::{layout::Rect, Frame};
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Borders, Clear},
+    Frame,
+};
 
 use super::panes::{compute_pane_infos_for_tab, render_panes, resize_tab_panes};
 use crate::app::AppState;
@@ -16,6 +20,8 @@ pub(crate) struct TabSurfaceLayout {
     pub(crate) target: Option<TabSurfaceTarget>,
     pub(crate) pane_infos: Vec<PaneInfo>,
     pub(crate) split_borders: Vec<SplitBorder>,
+    /// Rectangle the workspace dock reserved, taken out of the tab area.
+    pub(crate) dock_rect: Option<Rect>,
 }
 
 #[derive(Clone, Copy)]
@@ -63,6 +69,9 @@ pub(crate) fn compute_tab_surface_for(
             .tabs
             .get(target.tab_index)
     });
+    // Shadow `area` so nothing below can lay a pane, a border, or a runtime
+    // resize over the dock column.
+    let (area, dock_rect) = crate::dock::dock_split(area, app.dock);
     let split_borders = tab
         .map(|tab| {
             if tab.zoomed {
@@ -88,6 +97,7 @@ pub(crate) fn compute_tab_surface_for(
         target,
         pane_infos,
         split_borders,
+        dock_rect,
     }
 }
 
@@ -106,6 +116,7 @@ pub(crate) fn resize_tab_surface(
     else {
         return;
     };
+    let (area, _dock_rect) = crate::dock::dock_split(area, app.dock);
     resize_tab_panes(
         app,
         terminal_runtimes,
@@ -120,8 +131,12 @@ pub(crate) fn render_tab_surface(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
     surface: TabSurfaceView<'_>,
+    dock_rect: Option<Rect>,
     frame: &mut Frame,
 ) {
+    if let Some(dock_rect) = dock_rect {
+        render_dock(app, dock_rect, frame);
+    }
     render_panes(
         app,
         terminal_runtimes,
@@ -129,6 +144,18 @@ pub(crate) fn render_tab_surface(
         surface.target,
         surface.pane_infos,
         surface.split_borders,
+    );
+}
+
+/// Draw the dock column.
+///
+/// The dock has no process yet, so this only proves the column exists and is
+/// nobody else's to draw into.
+fn render_dock(_app: &AppState, dock_rect: Rect, frame: &mut Frame) {
+    frame.render_widget(Clear, dock_rect);
+    frame.render_widget(
+        Block::default().borders(Borders::ALL).title("dock"),
+        dock_rect,
     );
 }
 
@@ -264,7 +291,13 @@ mod tests {
             Terminal::new(TestBackend::new(full_area.width, full_area.height)).unwrap();
         terminal
             .draw(|frame| {
-                render_tab_surface(&app, &TerminalRuntimeRegistry::new(), surface_view, frame)
+                render_tab_surface(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    surface_view,
+                    surface.dock_rect,
+                    frame,
+                )
             })
             .unwrap();
 
@@ -284,5 +317,150 @@ mod tests {
             .iter()
             .any(|(_, symbol, link)| { symbol == "L" && link == uri }));
         assert!(tab_surface_cursor(&app, &TerminalRuntimeRegistry::new(), surface_view,).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_dock_takes_its_column_out_of_the_tab_area() {
+        let mut workspace = Workspace::test_new("dock-workspace");
+        workspace.test_split(Direction::Horizontal);
+
+        let mut app = AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+
+        let area = Rect::new(0, 0, 106, 20);
+        let registry = TerminalRuntimeRegistry::new();
+        let cell_size = crate::kitty_graphics::HostCellSize::default();
+
+        // Without a dock the panes and the divider own the whole width. This
+        // half is what the dock has to change; without it the assertions below
+        // would hold for a dock of any width, including none.
+        let undocked = compute_tab_surface(&app, &registry, area, false, cell_size);
+        assert_eq!(undocked.dock_rect, None);
+        assert_eq!(right_edge_of(&undocked), 106);
+
+        app.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: false,
+        });
+
+        let docked = compute_tab_surface(&app, &registry, area, false, cell_size);
+        assert_eq!(docked.dock_rect, Some(Rect::new(74, 0, 32, 20)));
+        assert_eq!(docked.pane_infos.len(), 2);
+        assert_eq!(
+            right_edge_of(&docked),
+            74,
+            "panes must stop where the dock starts"
+        );
+        assert!(
+            divider_positions(&docked).iter().all(|pos| *pos < 74),
+            "split borders must stop where the dock starts: {:?}",
+            divider_positions(&docked)
+        );
+        // The divider is the load-bearing half: it is laid out separately from
+        // the panes, so it would keep its old position if only the panes were
+        // told about the dock.
+        assert!(
+            divider_positions(&docked) < divider_positions(&undocked),
+            "the divider must move left with the panes: {:?} vs {:?}",
+            divider_positions(&docked),
+            divider_positions(&undocked)
+        );
+    }
+
+    #[tokio::test]
+    async fn dock_column_is_drawn_beside_the_panes() {
+        let mut workspace = Workspace::test_new("dock-workspace");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(Direction::Horizontal);
+        workspace.insert_test_runtime(
+            left,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(20, 8, b"LEFT"),
+        );
+        workspace.insert_test_runtime(
+            right,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(20, 8, b"RIGHT"),
+        );
+
+        let mut app = AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: false,
+        });
+
+        let area = Rect::new(0, 0, 106, 20);
+        let registry = TerminalRuntimeRegistry::new();
+        let surface = compute_tab_surface(
+            &app,
+            &registry,
+            area,
+            false,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        let view = TabSurfaceView {
+            target: surface.target,
+            pane_infos: &surface.pane_infos,
+            split_borders: &surface.split_borders,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_tab_surface(&app, &registry, view, surface.dock_rect, frame))
+            .unwrap();
+
+        let cells: Vec<&str> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        let rows: Vec<Vec<&str>> = cells
+            .chunks(area.width as usize)
+            .map(<[&str]>::to_vec)
+            .collect();
+        for row in &rows {
+            println!("{}", row.concat());
+        }
+
+        let dock_x = 74usize;
+        assert_eq!(
+            rows[0][dock_x], "\u{250c}",
+            "the dock's top-left corner sits at x=74"
+        );
+        assert!(
+            rows[0][dock_x..].concat().contains("dock"),
+            "the dock is titled: {:?}",
+            rows[0][dock_x..].concat()
+        );
+        let left_of_dock: String = rows.iter().map(|row| row[..dock_x].concat()).collect();
+        let dock_column: String = rows.iter().map(|row| row[dock_x..].concat()).collect();
+        assert!(left_of_dock.contains("LEFT") && left_of_dock.contains("RIGHT"));
+        assert!(
+            !dock_column.contains("LEFT") && !dock_column.contains("RIGHT"),
+            "no pane may draw into the dock column"
+        );
+    }
+
+    fn right_edge_of(layout: &TabSurfaceLayout) -> u16 {
+        layout
+            .pane_infos
+            .iter()
+            .map(|info| info.rect.x + info.rect.width)
+            .max()
+            .expect("a tab always has at least one pane")
+    }
+
+    fn divider_positions(layout: &TabSurfaceLayout) -> Vec<u16> {
+        layout
+            .split_borders
+            .iter()
+            .map(|border| border.pos)
+            .collect()
     }
 }

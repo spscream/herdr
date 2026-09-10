@@ -835,6 +835,8 @@ pub struct AppState {
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
+    /// Column reserved along one edge of the tab area, or `None` when off.
+    pub dock: Option<crate::dock::DockState>,
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
@@ -1062,6 +1064,7 @@ impl AppState {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,
+            dock: None,
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),

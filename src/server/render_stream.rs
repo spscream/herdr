@@ -413,7 +413,13 @@ pub(crate) fn render_tab_surface_virtual(
     let mut terminal = ratatui::Terminal::new(backend).expect("TestBackend::new should never fail");
     terminal
         .draw(|frame| {
-            crate::ui::render_tab_surface(app_state, terminal_runtimes, surface, frame);
+            crate::ui::render_tab_surface(
+                app_state,
+                terminal_runtimes,
+                surface,
+                layout.dock_rect,
+                frame,
+            );
         })
         .expect("render to TestBackend should never fail");
 
