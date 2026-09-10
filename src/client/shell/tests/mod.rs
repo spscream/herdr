@@ -148,6 +148,12 @@ pub(super) fn dock_surface() -> crate::protocol::ClientShellDockSurface {
             width: 30,
             height: 16,
         },
+        cursor: Some(crate::protocol::CursorState {
+            x: 78,
+            y: 3,
+            visible: true,
+            shape: 2,
+        }),
         mouse_reporting: false,
         sgr_pixel_mouse: false,
         pixel_width: 0,

@@ -661,6 +661,24 @@ impl ClientShellState {
             self.hits.popup = None;
             self.hits.dock = None;
         }
+        // A focused dock owns the text cursor. The server cannot decide this,
+        // because it does not know which client focused the dock, so the
+        // override happens here -- last, after every other cursor decision, and
+        // only when nothing modal is on top.
+        if self.dock_focused && self.overlay.is_none() && self.hits.dock.is_some() {
+            if let Some(cursor) = self
+                .dock_surface
+                .as_ref()
+                .and_then(|dock| dock.cursor.as_ref())
+            {
+                frame.cursor = Some(crate::protocol::CursorState {
+                    x: layout.pane_surface.x.saturating_add(cursor.x),
+                    y: layout.pane_surface.y.saturating_add(cursor.y),
+                    visible: cursor.visible,
+                    shape: cursor.shape,
+                });
+            }
+        }
         self.compose_graphics(&mut frame, layout);
         Some(frame)
     }

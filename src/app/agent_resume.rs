@@ -76,7 +76,7 @@ impl App {
     }
 
     fn pending_agent_resume_candidates(&self) -> Vec<PendingAgentResumeCandidate> {
-        let terminal_area = self.state.view.terminal_area;
+        let terminal_area = self.state.pane_area();
         if terminal_area.width == 0 || terminal_area.height == 0 {
             return Vec::new();
         };

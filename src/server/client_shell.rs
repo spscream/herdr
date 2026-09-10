@@ -439,6 +439,14 @@ fn dock_surface(
         terminal_id: dock_pane.terminal_id.to_string(),
         rect: outer.into(),
         inner_rect: inner.into(),
+        cursor: runtime
+            .and_then(|runtime| runtime.cursor_state(inner, true))
+            .map(|cursor| protocol::CursorState {
+                x: cursor.x,
+                y: cursor.y,
+                visible: cursor.visible,
+                shape: cursor.shape,
+            }),
         mouse_reporting: runtime.is_some_and(|runtime| runtime.mouse_reporting_enabled()),
         sgr_pixel_mouse: runtime.is_some_and(|runtime| runtime.sgr_pixel_mouse_enabled()),
         pixel_width,

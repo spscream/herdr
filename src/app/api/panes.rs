@@ -603,7 +603,7 @@ impl App {
         else {
             return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
         };
-        let area = self.state.view.terminal_area;
+        let area = self.state.pane_area();
         let Some(info) = tab
             .layout
             .panes(area)
@@ -715,7 +715,7 @@ impl App {
             .abs()
             .min(0.5);
         let direction: NavDirection = params.direction.into();
-        let area = self.state.view.terminal_area;
+        let area = self.state.pane_area();
         let changed = self
             .state
             .workspaces
@@ -1996,7 +1996,7 @@ impl App {
         direction: PaneDirection,
     ) -> Option<PaneId> {
         let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
-        let panes = tab.layout.panes(self.state.view.terminal_area);
+        let panes = tab.layout.panes(self.state.pane_area());
         let source = panes.iter().find(|pane| pane.id == source_pane_id)?;
         find_in_direction(source, direction.into(), &panes)
     }
@@ -2008,7 +2008,7 @@ impl App {
     ) -> Option<PaneLayoutSnapshot> {
         let ws = self.state.workspaces.get(ws_idx)?;
         let tab = ws.tabs.get(tab_idx)?;
-        let area = self.state.view.terminal_area;
+        let area = self.state.pane_area();
         let focused_pane_id = self.public_pane_id(ws_idx, tab.layout.focused())?;
         let panes = crate::ui::apply_pane_chrome(
             tab.layout.panes(area),
@@ -4005,6 +4005,52 @@ mod tests {
         assert!(edges.right);
         assert!(edges.up);
         assert!(edges.down);
+    }
+
+    #[test]
+    fn api_pane_edges_stop_at_the_dock_not_at_the_terminal() {
+        let mut app = app_with_linked_worktree();
+        let root = app.state.workspaces[0].tabs[0].root_pane;
+        let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.workspaces[0].tabs[0].layout.focus_pane(root);
+        app.state.dock = Some(crate::dock::DockState {
+            edge: crate::dock::DockEdge::Right,
+            width: crate::popup_size::PopupSize::Cells(32),
+            collapsed: false,
+        });
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 100, 20),
+        );
+        let right_public = app.public_pane_id(0, right).unwrap();
+
+        let response = app.handle_pane_edges(
+            "req".into(),
+            crate::api::schema::PaneEdgesParams {
+                pane_id: Some(right_public.clone()),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneEdges { edges } = success.result else {
+            panic!("expected pane edges response");
+        };
+        assert!(
+            edges.right,
+            "the rightmost pane still touches its own right edge, which the dock now bounds"
+        );
+        let right_rect = edges
+            .layout
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == right_public)
+            .expect("the snapshot must carry the pane")
+            .rect;
+        assert!(
+            right_rect.x + right_rect.width <= 68,
+            "the reported pane must stop at the dock, not at column 100: {right_rect:?}"
+        );
     }
 
     #[test]

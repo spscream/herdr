@@ -1245,6 +1245,10 @@ pub struct ClientShellDockSurface {
     pub terminal_id: String,
     pub rect: SurfaceRect,
     pub inner_rect: SurfaceRect,
+    /// The dock process's own cursor, in pane-surface coordinates. The server
+    /// reports it unconditionally; the client shows it only while the dock
+    /// holds the keyboard, because focus is a client-side fact.
+    pub cursor: Option<CursorState>,
     pub mouse_reporting: bool,
     pub sgr_pixel_mouse: bool,
     pub pixel_width: u32,

@@ -934,6 +934,16 @@ impl AppState {
     /// Returns true when the given (workspace, tab, pane) refers to the
     /// currently focused pane in the active workspace's active tab.
     /// The running process of `ws_idx`'s dock, if it has one.
+    /// The part of the terminal area the panes live in.
+    ///
+    /// `view.terminal_area` is the whole tab area, dock included, because the
+    /// dock itself has to be measured against it. Everything that lays panes
+    /// out, or compares a pane rect with an edge, wants this reduced rect
+    /// instead -- otherwise a docked tab reports geometry it never drew.
+    pub(crate) fn pane_area(&self) -> Rect {
+        crate::dock::dock_split(self.view.terminal_area, self.dock).0
+    }
+
     ///
     /// Mirrors `runtime_for_pane_in_workspace`, including its test fallback, so
     /// a dock can be rendered in a test without a real PTY.
